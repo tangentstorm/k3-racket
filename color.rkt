@@ -11,6 +11,7 @@
     (define excn-srclocs (exn:fail:read-srclocs excn))
     (srcloc-token (token 'ERROR) (car excn-srclocs)))
   (define srcloc-tok
+    ;((make-k3-lexer port)))
     (with-handlers ([exn:fail:read? handle-lexer-error])
       ((make-k3-lexer port))))
   (match srcloc-tok
@@ -20,17 +21,22 @@
        (srcloc-token
         (token-struct type val _ _ _ _ _)
         (srcloc _ _ _ posn span)) srcloc-tok)
+     ; (printf ">> ~a ~a ~a ~n" posn type val)
      (define start posn)
      (define end (+ start span))
      (match-define (list cat paren)
        (match type
          ['STRING '(string #f)]
+         ['SYMBOL '(symbol #f)]
          ['COMMENT '(comment #f)]
+         ['ENDNOTE '(comment #f)]
+         ['COMMAND '(keyword #f)]
          ['ERROR '(error #f)]
          [else (match val
                  [(? number?) '(constant #f)]
-                 [(? symbol?) '(symbol #f)]
                  ["(" '(parenthesis |(|)]
                  [")" '(parenthesis |)|)]
+                 ["{" '(parenthesis |{|)]
+                 ["}" '(parenthesis |}|)]
                  [else '(no-color #f)])]))
      (values val cat paren start end)]))
