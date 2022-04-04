@@ -3,7 +3,7 @@
 ; k3 lexer
 ;
 (require brag/support)
-(provide k3-lexer make-k3-lexer)
+(provide make-k3-lexer)
 
 (define (make-k3-lexer input [path #f])
   (port-count-lines! input)

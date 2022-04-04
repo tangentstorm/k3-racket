@@ -12,7 +12,7 @@
     (srcloc-token (token 'ERROR) (car excn-srclocs)))
   (define srcloc-tok
     (with-handlers ([exn:fail:read? handle-lexer-error])
-      (k3-lexer port)))
+      ((make-k3-lexer port))))
   (match srcloc-tok
     [(? eof-object?) (values srcloc-tok 'eof #f #f #f)]
     [else
