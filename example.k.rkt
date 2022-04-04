@@ -1,7 +1,9 @@
-#lang k3
+#lang k3/parse-only
 / test file that exercises k3 parser
+/(two comments in a row.)
 
-sort: {x@<x}
+sort: {x@<x} / end of line comment
+/ next line (and this one) have trailing "\"
 rsum: +/\
 `0: 5: rsum ints: !100
 `symbols`are`"fun!"

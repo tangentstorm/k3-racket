@@ -3,7 +3,13 @@
 ; k3 lexer
 ;
 (require brag/support)
-(provide k3-lexer)
+(provide k3-lexer make-k3-lexer)
+
+(define (make-k3-lexer input [path #f])
+  (port-count-lines! input)
+  (lexer-file-path path)
+  (λ () (k3-lexer input)))
+
 
 (define-lex-abbrevs
   [digit (char-set "0123456789")]

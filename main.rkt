@@ -8,15 +8,10 @@
 (module+ reader
   (provide read-syntax get-info))
 
-(define (make-tokenizer input [path #f])
-  (port-count-lines! input)
-  (lexer-file-path path)
-  (λ () (k3-lexer input)))
-
 (define (read-syntax path port)
   (strip-bindings
    #`(module k3-module k3/expand
-       #,(parse path (make-tokenizer port path)))))
+       #,(parse path (make-k3-lexer port path)))))
 
 (define (get-info port src-mod src-line src-col src-pos)
   (define (handle-query key default)
