@@ -15,7 +15,8 @@
   #'(#%module-begin K3 ...))
 
 (define (k-comment ARG) (void))
-(define-macro (k-endnote ARG) (void))
+(define (k-endnote ARG) (void))
+(define (k-command ARG) (printf "!! k interpreter command: ~a ~n" ARG))
 
 (define-macro (k-expr ARG ...)
   #'(displayln '(k-expr ARG ...)))
