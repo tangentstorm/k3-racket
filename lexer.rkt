@@ -8,9 +8,10 @@
 (define-lex-abbrevs
   [digit (char-set "0123456789")]
   [alpha alphabetic]
-  [ident (:: alpha (:* (:or alpha digit "_")))]
+  [ident (:: (:or alpha "_") (:* (:or alpha digit "_")))]
   [lname (:: ident (:* (:: "." ident)))]
   [gname (:+ (:: "." ident))]
+  [prim (:: (char-set "+-*%!&|<>=~,^#$?@."))]
   [string (from/to "\"" "\"")])
 
 
@@ -52,15 +53,19 @@
       (lexer-srcloc
        ["\n" (begin (check-for-slash) (token 'NL lexeme))]
        [whitespace (begin (check-for-slash) (token lexeme #:skip? #t))]
+       [(:or "{" "}" "(" ")" ":[" "[" "]" ";" ":") (token lexeme lexeme)]
+       [(:or "if[" "while[" "do[") (token lexeme lexeme)]
        [(:or "'" "':" "/" "/:" "\\" "\\:") (token 'ADVERB lexeme)]
-       [(:or "{" "}" "(" ")" "[" "]" ";" ":") (token lexeme lexeme)]
-       [(:or (:: digit ":") "::"
-             (:: (char-set "+-*%!&|<>=~,^#_$?@.") (:? ":")))
-        (token 'PRIM lexeme)]
+       [(:: (:or prim ":") ":") (token 'PRIMCOLON lexeme)]
+       [prim (token 'PRIM lexeme)]
+       ; numeric primitives are differente because they're never part of augmented assignment:
+       [(:: digit ":" (:? ":")) (token 'NUMCOLON lexeme)]
        [(:: (:? "-") (:+ digit) (:? (:: "." (:* digit)))) (token 'NUMBER lexeme)]
        [string (begin (token 'STRING lexeme))]
        [lname (token 'LNAME lexeme)]
        [gname (token 'GNAME lexeme)]
+       ;       [(:: "_" ident) (token 'BUILTIN lexeme)]
+       ;       [(:: "_" (:? ":")) (token 'PRIM lexeme)]
        [(:: "`" (:? (:or lname gname string))) (token 'SYMBOL lexeme)]))
     
     (cond [at-slash-token?

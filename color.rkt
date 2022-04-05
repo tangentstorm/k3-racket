@@ -11,9 +11,9 @@
     (define excn-srclocs (exn:fail:read-srclocs excn))
     (srcloc-token (token 'ERROR) (car excn-srclocs)))
   (define srcloc-tok
-    ;((make-k3-lexer port)))
-    (with-handlers ([exn:fail:read? handle-lexer-error])
-      ((make-k3-lexer port))))
+    ((make-k3-lexer port)))
+  ;(with-handlers ([exn:fail:read? handle-lexer-error])
+  ;  ((make-k3-lexer port))))
   (match srcloc-tok
     [(? eof-object?) (values srcloc-tok 'eof #f #f #f)]
     [else
@@ -30,7 +30,8 @@
          ['SYMBOL '(symbol #f)]
          ['COMMENT '(comment #f)]
          ['ENDNOTE '(comment #f)]
-         ['COMMAND '(keyword #f)]
+         ['COMMAND '(other #f)]
+         ['BUILTIN '(hash-colon-keyword #f)]
          ['ERROR '(error #f)]
          [else (match val
                  [(? number?) '(constant #f)]
@@ -38,5 +39,8 @@
                  [")" '(parenthesis |)|)]
                  ["{" '(parenthesis |{|)]
                  ["}" '(parenthesis |}|)]
+                 ["if" '(keyword #f)]
+                 ["do" '(keyword #f)]
+                 ["while" '(keyword #f)]
                  [else '(no-color #f)])]))
      (values val cat paren start end)]))

@@ -10,7 +10,17 @@ k-endnote : ENDNOTE
 @k-comment-line: k-comment /NL
 k-comment : COMMENT
 k-command : COMMAND
-@k-stmt-line : k-expr k-comment? /NL
-k-expr : (LNAME|PRIM|ADVERB|k-func|NUMBER|STRING|SYMBOL|":"|";")+
-@k-block: k-line* k-expr?
-k-func : "{" k-block "}"
+@k-stmt-line : k-stmts? k-comment? /NL
+@k-stmts : k-expr? (/";" k-expr?)*
+k-expr  : ":"|PRIMCOLON|k-return|k-chain
+@k-chain : (k-case|k-flow|k-assign|PRIM|NUMCOLON|BUILTIN|ADVERB|k-func|k-call|k-nest|NUMBER|STRING|SYMBOL|k-lvalue)+ PRIMCOLON?
+k-case : /":[" k-block /"]"
+k-flow : ("if["|"while["|"do[") k-block /"]"
+@k-nest : /"(" k-block /")"
+@k-block: k-line? (/NL* k-line?)* k-stmts?
+k-assign : k-lvalue (k-call)* (":"|PRIMCOLON) k-expr
+@k-lvalue : LNAME|GNAME
+k-call : /"[" k-block /"]"
+k-fsig : /"[" LNAME? (/";" LNAME)* /"]"
+k-func : /"{" k-fsig? k-block /"}"
+k-return : /":" k-expr
