@@ -19,7 +19,8 @@ k-flow : ("if["|"while["|"do[") k-block /"]"
 @k-nest : /"(" k-block /")"
 @k-block: k-line? (/NL* k-line?)* k-stmts?
 k-assign : k-lvalue (k-call)* (":"|PRIMCOLON) k-expr
-@k-lvalue : LNAME|GNAME
+@k-lvalue : k-ident k-call?
+k-ident : LNAME|GNAME
 k-call : /"[" k-block /"]"
 k-fsig : /"[" LNAME? (/";" LNAME)* /"]"
 k-func : /"{" k-fsig? k-block /"}"
