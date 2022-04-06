@@ -6,12 +6,15 @@
          "lexer.rkt" "parser.rkt")
 
 (module+ reader
-  (provide read-syntax get-info))
+  (provide read read-syntax get-info))
 
 (define (read-syntax path port)
   (strip-bindings
    #`(module k3-module k3/expand
        #,(parse path (make-k3-lexer port path)))))
+
+(define (read port)
+  (syntax->datum (read-syntax "" port)))
 
 (define (get-info port src-mod src-line src-col src-pos)
   (define (handle-query key default)
