@@ -1,2 +1,2 @@
-main:{`0:,hello, world}
-main[]
+main:{`0:,"hello, ",x,"!"}
+main["world"]
