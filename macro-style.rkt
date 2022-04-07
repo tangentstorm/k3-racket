@@ -19,20 +19,23 @@
 ;
 ; then follow macro-style-example.rkt for how to use it.
 ;
+(require (for-syntax racket/syntax))
 (provide
- k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
+  k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
 
-; TODO: macro to generate this.
-(define (k-code . args)      (cons 'k-code args))
-(define (k-endnote . args)   (cons 'k-endnote args))
-(define (k-comment . args)   (cons 'k-comment args))
-(define (k-command . args)   (cons 'k-command args))
-(define (k-expr . args)      (cons 'k-expr args))
-(define (k-case . args)      (cons 'k-case args))
-(define (k-flow . args)      (cons 'k-flow args))
-(define (k-assign . args)    (cons 'k-assign args))
-(define (k-ident . args)     (cons 'k-ident args))
-(define (k-call . args)      (cons 'k-call args))
-(define (k-fsig . args)      (cons 'k-fsig args))
-(define (k-func . args)      (cons 'k-func args))
-(define (k-return . args)    (cons 'k-return args))
+(define-syntax-rule (default-node-handler name)
+  (define (name . args) (cons 'name args)))
+
+(default-node-handler k-code)
+(default-node-handler k-endnote)
+(default-node-handler k-comment)
+(default-node-handler k-command)
+(default-node-handler k-expr)
+(default-node-handler k-case)
+(default-node-handler k-flow)
+(default-node-handler k-assign)
+(default-node-handler k-ident)
+(default-node-handler k-call)
+(default-node-handler k-fsig)
+(default-node-handler k-func)
+(default-node-handler k-return)
