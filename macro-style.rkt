@@ -24,13 +24,10 @@
 (define-syntax-rule (default-handler name)
   (define (name . args) (cons 'name args)))
 
-(define-syntax (provide-default-handlers stx)
-  (syntax-case stx ()
-    [(_ names ...)
-     (syntax/loc stx
-       (begin
-         (provide names ...)
-         (default-handler names) ...))]))
+(define-syntax-rule (provide-default-handlers name ...)
+  (begin
+    (provide name ...)
+    (default-handler name) ...))
 
 (provide-default-handlers
-  k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
+ k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
