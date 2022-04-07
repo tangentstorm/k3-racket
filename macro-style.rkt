@@ -20,20 +20,17 @@
 ; then follow macro-style-example.rkt for how to use it.
 ;
 (require (for-syntax racket/syntax))
-;(provide
-; k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
 
-(define-syntax-rule (default-node-handler name)
+(define-syntax-rule (default-handler name)
   (define (name . args) (cons 'name args)))
 
-(define-syntax (default-node-handlers stx)
+(define-syntax (provide-default-handlers stx)
   (syntax-case stx ()
     [(_ names ...)
-     (datum->syntax stx
-                    `(begin
-                       (provide ,@(syntax->datum #'(names ...)))
-                       ,@(map (λ(n) `(default-node-handler ,n))
-                              (syntax->datum #'(names ...)))))]))
+     (syntax/loc stx
+       (begin
+         (provide names ...)
+         (default-handler names) ...))]))
 
-(default-node-handlers
+(provide-default-handlers
   k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
