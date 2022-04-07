@@ -20,22 +20,20 @@
 ; then follow macro-style-example.rkt for how to use it.
 ;
 (require (for-syntax racket/syntax))
-(provide
-  k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
+;(provide
+; k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
 
 (define-syntax-rule (default-node-handler name)
   (define (name . args) (cons 'name args)))
 
-(default-node-handler k-code)
-(default-node-handler k-endnote)
-(default-node-handler k-comment)
-(default-node-handler k-command)
-(default-node-handler k-expr)
-(default-node-handler k-case)
-(default-node-handler k-flow)
-(default-node-handler k-assign)
-(default-node-handler k-ident)
-(default-node-handler k-call)
-(default-node-handler k-fsig)
-(default-node-handler k-func)
-(default-node-handler k-return)
+(define-syntax (default-node-handlers stx)
+  (syntax-case stx ()
+    [(_ names ...)
+     (datum->syntax stx
+                    `(begin
+                       (provide ,@(syntax->datum #'(names ...)))
+                       ,@(map (λ(n) `(default-node-handler ,n))
+                              (syntax->datum #'(names ...)))))]))
+
+(default-node-handlers
+  k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
