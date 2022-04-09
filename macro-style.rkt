@@ -19,7 +19,7 @@
 ;
 ; then follow macro-style-example.rkt for how to use it.
 ;
-(require (for-syntax racket/syntax))
+(require k3 rnrs/io/ports-6 (for-syntax racket/syntax))
 
 (define-syntax-rule (default-handler name)
   (define (name . args) (cons 'name args)))
@@ -29,5 +29,27 @@
     (provide name ...)
     (default-handler name) ...))
 
+(define (read-k3-file path)
+  (define port (open-file-input-port path))
+  (read-k3 path port))
+
+(define (expand-with mod stx)
+  (define ns (make-base-namespace))
+  (dynamic-require mod #f)
+  (namespace-attach-module (current-namespace) mod ns)
+  (namespace-require mod ns)
+  (parameterize [(current-namespace ns)]
+    (expand-to-top-form stx)))
+
+(define (eval-with mod stx)
+  (define ns (make-base-namespace))
+  (dynamic-require mod #f)
+  (namespace-attach-module (current-namespace) mod ns)
+  (namespace-require mod ns)
+  (parameterize [(current-namespace ns)]
+    (eval (expand-to-top-form stx))))
+
+(provide expand-with eval-with read-k3-file)
 (provide-default-handlers
  k-code k-endnote k-comment k-command k-expr k-case k-flow k-assign k-ident k-call k-fsig k-func k-return)
+

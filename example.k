@@ -1,4 +1,4 @@
-#lang k3/parse-only
+
 / test file that exercises k3 parser
 /(two comments in a row.)
 
