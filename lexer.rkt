@@ -56,7 +56,14 @@
        [(:or "{" "}" "(" ")" ":[" "[" "]" ";" ":") (token lexeme lexeme)]
        [(:or "if[" "while[" "do[") (token lexeme lexeme)]
        [(:or "'" "':" "/" "/:" "\\" "\\:") (token 'ADVERB lexeme)]
-       [(:: (:or prim ":") ":") (token 'PRIMCOLON lexeme)]
+       [(:: (:or prim ":") ":")
+        ; have to peek one character to deal with things like: a,:[case-expr]
+        (begin
+          (if (and (equal? (substring lexeme 1) ":")
+                   (equal? (peek-char input) #\[))
+              ; (unget-char! input) was not needed. seems setting the span is enough.
+              (token 'PRIM (substring lexeme 0 (sub1 (string-length lexeme))))
+              (token 'PRIMCOLON lexeme)))]
        [prim (token 'PRIM lexeme)]
        ; numeric primitives are differente because they're never part of augmented assignment:
        [(:: digit ":" (:? ":")) (token 'NUMCOLON lexeme)]
