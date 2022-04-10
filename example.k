@@ -1,4 +1,4 @@
-
+#lang k3
 / test file that exercises k3 parser
 /(two comments in a row.)
 
@@ -9,7 +9,8 @@ rsum: +/\
 \d interpreter command
 csl:1_"",/",",/:$:   / train with monad at end
 p:(123;`abc)
-/ TODO: handle ",:" here:  `0:"abc",:[1;"d";"z"]
+/ handling a,:[<case-stmt>] requires 1 char peek
+`0:"abc",:[1;"d";"z"]
 p,::[ 1 ; `t
    0 ; if[ 0 ; `f ]
 ]
