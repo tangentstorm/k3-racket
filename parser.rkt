@@ -12,8 +12,8 @@ k-comment : COMMENT
 k-command : COMMAND
 @k-stmt-line : k-stmts? k-comment? /NL
 @k-stmts : k-expr? (/";" k-expr?)*
-k-expr  : ":"|PRIMCOLON|k-return|k-chain
-@k-chain : (k-case|k-flow|k-assign|PRIM|NUMCOLON|BUILTIN|ADVERB|k-func|k-call|k-nest|NUMBER|STRING|SYMBOL|k-lvalue)+ PRIMCOLON?
+k-expr  : ":"|k-return|k-chain
+@k-chain : (k-case|k-flow|k-assign|PRIM|PRIMCOLON|NUMCOLON|BUILTIN|ADVERB|k-func|k-call|k-nest|NUMBER|STRING|SYMBOL|k-lvalue)+ PRIMCOLON?
 k-case : /":[" k-block /"]"
 k-flow : ("if["|"while["|"do[") k-block /"]"
 @k-nest : /"(" k-block /")"
