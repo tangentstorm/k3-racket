@@ -1,4 +1,4 @@
-#lang k3
+#lang k3/parse-only
 / test file that exercises k3 parser
 /(two comments in a row.)
 
@@ -30,6 +30,8 @@ whitespace : {  [  abc  ]
 `0: sort "hello world"
 `0: ,$ 10 10 $ ints
 `0: (2 * 3) + 4
+
+*:'("hello";"world") / test adverb after monad
 
 \
 This text at the bottom should be ignored.
