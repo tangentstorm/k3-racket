@@ -32,6 +32,7 @@ whitespace : {  [  abc  ]
 `0: (2 * 3) + 4
 
 *:'("hello";"world") / test adverb after monad
+"This is a quote: '\"'"
 
 \
 This text at the bottom should be ignored.
