@@ -12,7 +12,8 @@
   [lname (:: ident (:* (:: "." ident)))]
   [gname (:+ (:: "." ident))]
   [prim (:: (char-set "+-*%!&|<>=~,^#$?@."))]
-  [string (:: "\"" (:* (:or "\\\"" (:~ "\""))) "\"")])
+  [string  (:: "\"" (:* (:or (:: "\\" (char-set "\\\"ntvf0"))
+                             (:~ (char-set "\\\"")))) "\"")])
 
 
 (define (unget-char! port)
