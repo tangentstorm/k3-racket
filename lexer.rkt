@@ -18,8 +18,8 @@
   ; \r for carriage may be undocumented. Any other character can
   ; also be escaped, in which case the backslash is ignored.
   ; so this lexer preserves the backslashes and just includes the entire
-  ; printable ascii character set (:/ " " "~")
-  [string  (:: "\"" (:* (:or (:: "\\" (:/ " " "~"))
+  ; ascii character set (:/ "\0" "~")
+  [string  (:: "\"" (:* (:or (:: "\\" (:/ "\0" "~"))
                              (:~ (char-set "\\\"")))) "\"")])
 
 
