@@ -61,8 +61,9 @@
       (lexer-srcloc
        ["\n" (begin (check-for-slash) (token 'NL lexeme))]
        [whitespace (begin (check-for-slash) (token lexeme #:skip? #t))]
-       [(:or "{" "}" "(" ")" ":[" "[" "]" ";" ":") (token lexeme lexeme)]
-       [(:or "if[" "while[" "do[") (token lexeme lexeme)]
+       [(:or "{" "(" ":[" "[" "if[" "while[" "do[")
+        (begin (check-for-slash) (token lexeme lexeme))]
+       [(:or "}" ")" "]" ";" ":") (token lexeme lexeme)]
        [(:or "'" "':" "/" "/:" "\\" "\\:") (token 'ADVERB lexeme)]
        [(:: (:or prim ":") ":")
         ; have to peek one character to deal with things like: a,:[case-expr]

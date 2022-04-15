@@ -23,8 +23,10 @@ multi: { a:.global[_n]; 2 }
 
 whitespace : {  [  abc  ]
                 result:dyadic[32 ;3 4]
-           12
    :  result}
+
+f:{/should ignore this paren: (
+    y[x]}
 
 `0: 5: rsum ints: !100
 `symbols`are`"fun!"
