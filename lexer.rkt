@@ -12,7 +12,14 @@
   [lname (:: ident (:* (:: "." ident)))]
   [gname (:+ (:: "." ident))]
   [prim (:: (char-set "+-*%!&|<>=~,^#$?@."))]
-  [string  (:: "\"" (:* (:or (:: "\\" (char-set "\\\"ntvf0"))
+  ; string escapes in k3 are officially "the same as in the c language"
+  ; with the following specific examples given: \b backspace \n newline
+  ; \t tab \" doublequote \\ backslash  \o \oo \ooo octal numbers.
+  ; \r for carriage may be undocumented. Any other character can
+  ; also be escaped, in which case the backslash is ignored.
+  ; so this lexer preserves the backslashes and just includes the entire
+  ; printable ascii character set (:/ " " "~")
+  [string  (:: "\"" (:* (:or (:: "\\" (:/ " " "~"))
                              (:~ (char-set "\\\"")))) "\"")])
 
 
