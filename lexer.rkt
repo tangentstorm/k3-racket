@@ -8,10 +8,10 @@
 (define-lex-abbrevs
   [digit (char-set "0123456789")]
   [alpha alphabetic]
-  [ident (:: (:or alpha "_") (:* (:or alpha digit "_")))]
+  [ident (:: (:? "_") alpha (:* (:or alpha digit "_")))]
   [lname (:: ident (:* (:: "." ident)))]
   [gname (:+ (:: "." ident))]
-  [prim (:: (char-set "+-*%!&|<>=~,^#$?@."))]
+  [prim (:: (char-set "_+-*%!&|<>=~,^#$?@."))]
   ; string escapes in k3 are officially "the same as in the c language"
   ; with the following specific examples given: \b backspace \n newline
   ; \t tab \" doublequote \\ backslash  \o \oo \ooo octal numbers.

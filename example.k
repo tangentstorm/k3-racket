@@ -8,6 +8,7 @@ rsum: +/\
 
 \d interpreter command
 csl:1_"",/",",/:$:   / train with monad at end
+floor_floats:{@[x; &2=4::'x; _:]} / regression test
 p:(123;`abc)
 / handling a,:[<case-stmt>] requires 1 char peek
 `0:"abc",:[1;"d";"z"]
