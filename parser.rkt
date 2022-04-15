@@ -3,7 +3,7 @@
 ; grammar for the k3 language
 ; (uses tokens defined in lexer.rkt)
 ;
-k-code : k-line* k-stmts? (k-endnote | k-command)?
+k-code : k-line* k-stmts? (k-endnote | k-command | k-comment)?
 k-endnote : ENDNOTE
 @k-line : k-comment-line | k-command-line | k-stmt-line | /NL
 @k-command-line: k-command /NL
