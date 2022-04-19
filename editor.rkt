@@ -1,8 +1,7 @@
 #lang racket/gui
-(require framework)
+(require framework racket/gui/easy)
 (require k3/color k3)
 (require syntax/stx)
-
 
 (define k-path "example.k")
 
@@ -56,7 +55,7 @@
  (add-style "other" "Magenta")
  (add-style "Standard" "Black"))
 
-(define k3-text%
+(define k3-text% ; plain gui framework
   (class color:text%
     (super-new)
 
@@ -72,18 +71,40 @@
         (printf "click @ pos:~a ch:~a snip:~a\n" pos ch snip)
         (for [(node (find-token ast pos))] (displayln node))))))
 
+(define k3-view% ; for easy-gui
+  (class* object% (view<%>)
+    (init-field path)
+    (super-new)
 
-(define win (new frame% [label k-path] [width 1024] [height 768]))
-(define ed (new editor-canvas% (parent win)))
-(define txt (new k3-text%))
-(send ed set-editor txt)
-(define (token-sym->style sym) (symbol->string sym))
-(define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
-(send txt start-colorer token-sym->style k3-color pairs)
+    (define/public (dependencies) '())
+
+    (define/public (create parent)
+      (define ed (new editor-canvas% (parent parent)))
+      (define txt (new k3-text%))
+      (send ed set-editor txt)
+      (define (token-sym->style sym) (symbol->string sym))
+      (define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
+      (send txt start-colorer token-sym->style k3-color pairs)
+      (void (send txt load-file k-path))
+      (send txt set-style-list styles))
+
+    (define/public (update v what val)
+      (void))
+    (define/public (destroy v)
+      (void))))
+
+(define (k3-view path)
+  (new k3-view% [path path]))
+
 
 ; -- main program ------------------------------------------------
 
-(void (send txt load-file k-path))
-(send txt set-style-list styles)
-(send win show #t)
-(define ast (read-k3 k-path (open-input-string (send txt get-text 0 'eof))))
+(define win
+  (window
+   #:title k-path #:size '(1024 768)
+   (k3-view k-path) ))
+
+;(define ast (read-k3 k-path (open-input-string (send txt get-text 0 'eof))))
+(define ast (read-k3 k-path (open-input-file k-path)))
+
+(render win)
