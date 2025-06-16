@@ -93,6 +93,7 @@
     (define definitions-list #f)
     (define current-file-path #f)
     (define current-definitions '()) ; Store definitions with line numbers
+    (define sort-alphabetically? #f) ; Sort by name when true, by line number when false
 
     (define/public (dependencies) '())
 
@@ -140,6 +141,11 @@
             (set! definitions (cons (list name line-num) definitions)))))
       (reverse definitions))
 
+    (define (sort-definitions defs)
+      (if sort-alphabetically?
+          (sort defs (lambda (a b) (string<? (car a) (car b))))
+          defs)) ; already sorted by line number from extraction
+
     (define/public (update-definitions file-path)
       (set! current-file-path file-path)
       (when (and definitions-list (file-exists? file-path))
@@ -147,12 +153,28 @@
         (define defs (if (string-suffix? file-path ".k")
                         (extract-k3-definitions text)
                         (extract-racket-definitions text)))
-        (set! current-definitions defs)
-        (send definitions-list set (map (lambda (def) (format "~a (line ~a)" (car def) (cadr def))) defs))))
+        (define sorted-defs (sort-definitions defs))
+        (set! current-definitions sorted-defs)
+        (send definitions-list set (map (lambda (def) (format "~a (line ~a)" (car def) (cadr def))) sorted-defs))))
+
+    (define/public (refresh-definitions)
+      (when current-file-path
+        (update-definitions current-file-path)))
 
     (define/public (create parent)
       (define panel (new vertical-panel% [parent parent] [min-width 200]))
-      (define label (new message% [parent panel] [label "Definitions:"]))
+
+      ; Header with label and sort checkbox
+      (define header-panel (new horizontal-panel% [parent panel] [stretchable-height #f]))
+      (define label (new message% [parent header-panel] [label "Definitions:"]))
+      (define sort-checkbox (new check-box%
+                                 [parent header-panel]
+                                 [label "az"]
+                                 [value #f]
+                                 [callback (lambda (cb event)
+                                            (set! sort-alphabetically? (send cb get-value))
+                                            (refresh-definitions))]))
+
       (set! definitions-list (new list-box%
                                   [parent panel]
                                   [label #f]
