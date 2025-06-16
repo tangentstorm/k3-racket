@@ -29,10 +29,18 @@
 (define (find-color c) (send the-color-database find-color c))
 ;(editor:set-default-font-color (find-color "Red") (find-color "Yellow"))
 
+; Platform-aware font selection
+(define (get-monospace-font)
+  (case (system-type 'os)
+    [(windows) "Consolas"]
+    [(macosx) "Menlo"]
+    [(unix) "DejaVu Sans Mono"]
+    [else "monospace"]))
+
 (define styles (new style-list%)) ; includes "Basic"
 (define Syntax (send styles new-named-style "Syntax" (send styles basic-style)))
 (let [(delta (new style-delta%))]
-  (send delta set-delta-face "Consolas")
+  (send delta set-delta-face (get-monospace-font))
   (send delta set-delta 'change-size 12)
   (send Syntax set-delta delta))
 
@@ -82,11 +90,11 @@
       (define ed (new editor-canvas% (parent parent)))
       (define txt (new k3-text%))
       (send ed set-editor txt)
+      (send txt set-style-list styles)  ; Set style list first
       (define (token-sym->style sym) (symbol->string sym))
       (define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
       (send txt start-colorer token-sym->style k3-color pairs)
-      (void (send txt load-file k-path))
-      (send txt set-style-list styles))
+      (void (send txt load-file k-path)))
 
     (define/public (update v what val)
       (void))
