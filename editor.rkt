@@ -63,8 +63,8 @@
  (add-style "other" "Magenta")
  (add-style "Standard" "Black"))
 
-(define k3-text% ; plain gui framework
-  (class color:text%
+(define k3-text% ; enhanced editor
+  (class racket:text%
     (super-new)
 
     (define/override (on-local-event e)
@@ -79,34 +79,121 @@
         (printf "click @ pos:~a ch:~a snip:~a\n" pos ch snip)
         (for [(node (find-token ast pos))] (displayln node))))))
 
+; Definitions panel component
+(define definitions-panel%
+  (class* object% (view<%>)
+    (init-field [editor #f])
+    (super-new)
+
+    (define definitions-list #f)
+    (define current-file-path #f)
+    (define current-definitions '()) ; Store definitions with line numbers
+
+    (define/public (dependencies) '())
+
+    (define/public (set-editor! ed)
+      (set! editor ed))
+
+    (define (extract-k3-definitions text)
+      (define lines (string-split text "\n"))
+      (define definitions '())
+      (for ([line lines] [line-num (in-naturals 1)])
+        (define trimmed (string-trim line))
+        (when (and (not (string-prefix? trimmed "/"))  ; not a comment
+                   (not (string-prefix? trimmed "\\")) ; not a command
+                   (regexp-match #rx"^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$" trimmed))
+          (define match (regexp-match #rx"^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$" trimmed))
+          (when match
+            (define name (cadr match))
+            (set! definitions (cons (list name line-num) definitions)))))
+      (reverse definitions))
+
+    (define (extract-racket-definitions text)
+      (define definitions '())
+      (define lines (string-split text "\n"))
+      (for ([line lines] [line-num (in-naturals 1)])
+        (define trimmed (string-trim line))
+        ; Only match definitions that start at the beginning of the line (top-level)
+        (when (or (regexp-match #rx"^\\(define\\s+([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed)
+                  (regexp-match #rx"^\\(define/public\\s+\\(([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed)
+                  (regexp-match #rx"^\\(define/override\\s+\\(([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed)
+                  (regexp-match #rx"^\\(define\\s+\\(([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed))
+          (define match (or (regexp-match #rx"^\\(define\\s+([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed)
+                           (regexp-match #rx"^\\(define/public\\s+\\(([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed)
+                           (regexp-match #rx"^\\(define/override\\s+\\(([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed)
+                           (regexp-match #rx"^\\(define\\s+\\(([a-zA-Z_][a-zA-Z0-9_-]*)" trimmed)))
+          (when match
+            (define name (cadr match))
+            (set! definitions (cons (list name line-num) definitions)))))
+      (reverse definitions))
+
+    (define/public (update-definitions file-path)
+      (set! current-file-path file-path)
+      (when (and definitions-list (file-exists? file-path))
+        (define text (file->string file-path))
+        (define defs (if (string-suffix? file-path ".k")
+                        (extract-k3-definitions text)
+                        (extract-racket-definitions text)))
+        (set! current-definitions defs)
+        (send definitions-list set (map (lambda (def) (format "~a (line ~a)" (car def) (cadr def))) defs))))
+
+    (define/public (create parent)
+      (define panel (new vertical-panel% [parent parent] [min-width 200]))
+      (define label (new message% [parent panel] [label "Definitions:"]))
+      (set! definitions-list (new list-box%
+                                  [parent panel]
+                                  [label #f]
+                                  [choices '()]
+                                  [callback (lambda (lb event)
+                                             (when (eq? 'list-box-dclick (send event get-event-type))
+                                               (define selection (send lb get-selection))
+                                               (when (and selection editor (< selection (length current-definitions)))
+                                                 (define def (list-ref current-definitions selection))
+                                                 (define line-num (cadr def))
+                                                 ; Jump to the line in the editor
+                                                 (define line-start (send editor paragraph-start-position (- line-num 1)))
+                                                 (define line-end (send editor paragraph-end-position (- line-num 1)))
+                                                 ; Set cursor position and select the line
+                                                 (send editor set-position line-start line-end)
+                                                 ; Scroll to put the line at the top of the visible area
+                                                 (send editor scroll-to-position line-start))))]))
+      panel)
+
+    (define/public (update v what val) (void))
+    (define/public (destroy v) (void))))
+
 ; File browser component
 (define file-browser%
   (class* object% (view<%>)
     (init-field [root-path "."])
     (super-new)
-    
+
     (define current-editor #f)
     (define current-path (simplify-path (path->complete-path root-path)))
     (define file-list #f)
     (define path-panel #f)
-    
+    (define definitions-panel #f)
+
     (define/public (dependencies) '())
-    
+
     (define/public (set-editor! editor)
       (set! current-editor editor))
-    
+
+    (define/public (set-definitions-panel! panel)
+      (set! definitions-panel panel))
+
     (define (get-items path)
       (define items '())
       ; Add parent directory if not at root
       (unless (equal? path (simplify-path (build-path path "..")))
         (set! items (cons ".." items)))
       ; Add directories
-      (define dirs (filter (lambda (p) 
+      (define dirs (filter (lambda (p)
                             (directory-exists? (build-path path p)))
                           (directory-list path)))
       (set! items (append items (map (lambda (d) (string-append "[" (path->string d) "]")) dirs)))
       ; Add files
-      (define files (filter (lambda (p) 
+      (define files (filter (lambda (p)
                              (let ([full-path (build-path path p)])
                                (and (file-exists? full-path)
                                     (or (string-suffix? (path->string p) ".k")
@@ -115,32 +202,35 @@
                            (directory-list path)))
       (set! items (append items (map path->string files)))
       items)
-    
+
     (define (load-file-in-editor file-path)
       (when current-editor
         (send current-editor clear)
-        (send current-editor load-file (path->string file-path))))
-    
+        (send current-editor load-file (path->string file-path))
+        ; Update definitions panel when file is loaded
+        (when definitions-panel
+          (send definitions-panel update-definitions (path->string file-path)))))
+
     (define (navigate-to new-path)
       (set! current-path (simplify-path (path->complete-path new-path)))
       (refresh-view))
-    
+
     (define (refresh-view)
       (when file-list
         (send file-list set (get-items current-path)))
       (when path-panel
         (update-path-display)))
-    
+
     (define (update-path-display)
       (send path-panel change-children (lambda (children) '()))
       (define path-parts (explode-path current-path))
       (define (create-path-button part accumulated-path)
-        (new button% 
+        (new button%
              [parent path-panel]
              [label (if (path? part) (path->string part) (format "~a" part))]
              [callback (lambda (button event)
                         (navigate-to accumulated-path))]))
-      
+
       (let loop ([parts path-parts] [acc-path #f])
         (unless (null? parts)
           (define part (car parts))
@@ -149,12 +239,12 @@
           (unless (null? (cdr parts))
             (new message% [parent path-panel] [label "/"]))
           (loop (cdr parts) new-acc))))
-    
+
     (define/public (create parent)
       (define panel (new vertical-panel% [parent parent] [min-width 150]))
-      
+
       ; File/directory list (no path breadcrumb here)
-      (set! file-list (new list-box% 
+      (set! file-list (new list-box%
                            [parent panel]
                            [label #f]
                            [choices (get-items current-path)]
@@ -175,13 +265,13 @@
                                              (define file-path (build-path current-path item-name))
                                              (load-file-in-editor file-path)]))))]))
       panel)
-    
+
     (define/public (create-path-panel parent)
       ; Create path breadcrumb panel
       (set! path-panel (new horizontal-panel% [parent parent] [stretchable-height #f]))
       (update-path-display)
       path-panel)
-    
+
     (define/public (update v what val) (void))
     (define/public (destroy v) (void))))
 
@@ -192,39 +282,50 @@
 
     (define txt #f)
     (define file-browser #f)
+    (define definitions-panel #f)
 
     (define/public (dependencies) '())
 
     (define/public (create parent)
       (define main-container (new vertical-panel% [parent parent]))
-      
+
       ; Create file browser first to get access to path panel creation
       (set! file-browser (new file-browser% [root-path "."]))
-      
+
       ; Create path breadcrumb at the top
       (send file-browser create-path-panel main-container)
-      
-      ; Create horizontal panel for browser and editor
+
+      ; Create horizontal panel for browser, editor, and definitions
       (define main-panel (new horizontal-panel% [parent main-container]))
-      
+
       ; Create narrow file browser (left side)
       (define browser-panel (send file-browser create main-panel))
       (send browser-panel min-width 150)
       (send browser-panel stretchable-width #f)
-      
-      ; Create editor (right side) - takes remaining space
+
+      ; Create editor (center) - takes remaining space
       (define ed (new editor-canvas% [parent main-panel]))
       (set! txt (new k3-text%))
       (send ed set-editor txt)
       (send txt set-style-list styles)
-      
-      ; Connect file browser to editor
+
+      ; Create definitions panel (right side)
+      (set! definitions-panel (new definitions-panel% [editor txt]))
+      (define defs-panel (send definitions-panel create main-panel))
+      (send defs-panel min-width 200)
+      (send defs-panel stretchable-width #f)
+
+      ; Connect file browser to editor and definitions panel
       (send file-browser set-editor! txt)
-      
+      (send file-browser set-definitions-panel! definitions-panel)
+
       (define (token-sym->style sym) (symbol->string sym))
       (define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
       (send txt start-colorer token-sym->style k3-color pairs)
-      (void (send txt load-file k-path)))
+      (void (send txt load-file k-path))
+
+      ; Update definitions for initial file
+      (send definitions-panel update-definitions k-path))
 
     (define/public (update v what val)
       (void))
