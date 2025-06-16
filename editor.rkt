@@ -3,7 +3,12 @@
 (require k3/color k3)
 (require syntax/stx)
 
-(define k-path "example.k")
+; Read file path from command line arguments, default to "example.k"
+(define k-path
+  (let ([args (current-command-line-arguments)])
+    (if (> (vector-length args) 0)
+        (vector-ref args 0)
+        "example.k")))
 
 ; --  syntax tree support  ----------------------------------------
 
