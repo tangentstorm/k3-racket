@@ -79,18 +79,148 @@
         (printf "click @ pos:~a ch:~a snip:~a\n" pos ch snip)
         (for [(node (find-token ast pos))] (displayln node))))))
 
+; File browser component
+(define file-browser%
+  (class* object% (view<%>)
+    (init-field [root-path "."])
+    (super-new)
+    
+    (define current-editor #f)
+    (define current-path (simplify-path (path->complete-path root-path)))
+    (define file-list #f)
+    (define path-panel #f)
+    
+    (define/public (dependencies) '())
+    
+    (define/public (set-editor! editor)
+      (set! current-editor editor))
+    
+    (define (get-items path)
+      (define items '())
+      ; Add parent directory if not at root
+      (unless (equal? path (simplify-path (build-path path "..")))
+        (set! items (cons ".." items)))
+      ; Add directories
+      (define dirs (filter (lambda (p) 
+                            (directory-exists? (build-path path p)))
+                          (directory-list path)))
+      (set! items (append items (map (lambda (d) (string-append "[" (path->string d) "]")) dirs)))
+      ; Add files
+      (define files (filter (lambda (p) 
+                             (let ([full-path (build-path path p)])
+                               (and (file-exists? full-path)
+                                    (or (string-suffix? (path->string p) ".k")
+                                        (string-suffix? (path->string p) ".rkt")
+                                        (string-suffix? (path->string p) ".txt")))))
+                           (directory-list path)))
+      (set! items (append items (map path->string files)))
+      items)
+    
+    (define (load-file-in-editor file-path)
+      (when current-editor
+        (send current-editor clear)
+        (send current-editor load-file (path->string file-path))))
+    
+    (define (navigate-to new-path)
+      (set! current-path (simplify-path (path->complete-path new-path)))
+      (refresh-view))
+    
+    (define (refresh-view)
+      (when file-list
+        (send file-list set (get-items current-path)))
+      (when path-panel
+        (update-path-display)))
+    
+    (define (update-path-display)
+      (send path-panel change-children (lambda (children) '()))
+      (define path-parts (explode-path current-path))
+      (define (create-path-button part accumulated-path)
+        (new button% 
+             [parent path-panel]
+             [label (if (path? part) (path->string part) (format "~a" part))]
+             [callback (lambda (button event)
+                        (navigate-to accumulated-path))]))
+      
+      (let loop ([parts path-parts] [acc-path #f])
+        (unless (null? parts)
+          (define part (car parts))
+          (define new-acc (if acc-path (build-path acc-path part) part))
+          (create-path-button part new-acc)
+          (unless (null? (cdr parts))
+            (new message% [parent path-panel] [label "/"]))
+          (loop (cdr parts) new-acc))))
+    
+    (define/public (create parent)
+      (define panel (new vertical-panel% [parent parent] [min-width 150]))
+      
+      ; File/directory list (no path breadcrumb here)
+      (set! file-list (new list-box% 
+                           [parent panel]
+                           [label #f]
+                           [choices (get-items current-path)]
+                           [callback (lambda (lb event)
+                                      (when (eq? 'list-box-dclick (send event get-event-type))
+                                        (define selection (send lb get-selection))
+                                        (when selection
+                                          (define item-name (send lb get-string selection))
+                                          (cond
+                                            [(equal? item-name "..")
+                                             (navigate-to (build-path current-path ".."))]
+                                            [(and (string-prefix? item-name "[") (string-suffix? item-name "]"))
+                                             ; Directory - remove brackets and navigate
+                                             (define dir-name (substring item-name 1 (- (string-length item-name) 1)))
+                                             (navigate-to (build-path current-path dir-name))]
+                                            [else
+                                             ; File - load in editor
+                                             (define file-path (build-path current-path item-name))
+                                             (load-file-in-editor file-path)]))))]))
+      panel)
+    
+    (define/public (create-path-panel parent)
+      ; Create path breadcrumb panel
+      (set! path-panel (new horizontal-panel% [parent parent] [stretchable-height #f]))
+      (update-path-display)
+      path-panel)
+    
+    (define/public (update v what val) (void))
+    (define/public (destroy v) (void))))
+
 (define k3-view% ; for easy-gui
   (class* object% (view<%>)
     (init-field path)
     (super-new)
 
+    (define txt #f)
+    (define file-browser #f)
+
     (define/public (dependencies) '())
 
     (define/public (create parent)
-      (define ed (new editor-canvas% (parent parent)))
-      (define txt (new k3-text%))
+      (define main-container (new vertical-panel% [parent parent]))
+      
+      ; Create file browser first to get access to path panel creation
+      (set! file-browser (new file-browser% [root-path "."]))
+      
+      ; Create path breadcrumb at the top
+      (send file-browser create-path-panel main-container)
+      
+      ; Create horizontal panel for browser and editor
+      (define main-panel (new horizontal-panel% [parent main-container]))
+      
+      ; Create narrow file browser (left side)
+      (define browser-panel (send file-browser create main-panel))
+      (send browser-panel min-width 150)
+      (send browser-panel stretchable-width #f)
+      
+      ; Create editor (right side) - takes remaining space
+      (define ed (new editor-canvas% [parent main-panel]))
+      (set! txt (new k3-text%))
       (send ed set-editor txt)
-      (send txt set-style-list styles)  ; Set style list first
+      (send txt set-style-list styles)
+      
+      ; Connect file browser to editor
+      (send file-browser set-editor! txt)
+      
       (define (token-sym->style sym) (symbol->string sym))
       (define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
       (send txt start-colorer token-sym->style k3-color pairs)
