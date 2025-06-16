@@ -10,6 +10,16 @@
         (vector-ref args 0)
         "example.k")))
 
+; Shared function to load a file and reset scroll position
+(define (load-file-with-scroll-reset editor file-path)
+  (send editor clear)
+  (send editor load-file file-path)
+  ; Reset scroll position to top-left after loading file
+  (send editor set-position 0)
+  (send editor scroll-to-position 0)
+  ; Force horizontal scroll to leftmost position
+  (send editor move-position 'home #f 'simple))
+
 ; --  syntax tree support  ----------------------------------------
 
 (define (pos-in-syntax? pos stx)
@@ -240,8 +250,7 @@
 
     (define (load-file-in-editor file-path)
       (when current-editor
-        (send current-editor clear)
-        (send current-editor load-file (path->string file-path))
+        (load-file-with-scroll-reset current-editor (path->string file-path))
         ; Update definitions panel when file is loaded
         (when definitions-panel
           (send definitions-panel update-definitions (path->string file-path)))))
@@ -344,6 +353,9 @@
       (send ed set-editor txt)
       (send txt set-style-list styles)
 
+      ; Ensure editor starts at top-left position
+      (send ed scroll-to 0 0 0 0 #t)
+
       ; Create definitions panel (right side)
       (set! definitions-panel (new definitions-panel% [editor txt]))
       (define defs-panel (send definitions-panel create main-panel))
@@ -357,7 +369,9 @@
       (define (token-sym->style sym) (symbol->string sym))
       (define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
       (send txt start-colorer token-sym->style k3-color pairs)
-      (void (send txt load-file k-path))
+
+      ; Load initial file with proper scroll reset
+      (load-file-with-scroll-reset txt k-path)
 
       ; Update definitions for initial file
       (send definitions-panel update-definitions k-path))
