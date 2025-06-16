@@ -97,15 +97,23 @@
     (define (extract-k3-definitions text)
       (define lines (string-split text "\n"))
       (define definitions '())
+      (define brace-depth 0)
       (for ([line lines] [line-num (in-naturals 1)])
         (define trimmed (string-trim line))
-        (when (and (not (string-prefix? trimmed "/"))  ; not a comment
+        ; Update brace depth by counting braces in the line
+        (define open-braces (length (regexp-match* #rx"\\{" line)))
+        (define close-braces (length (regexp-match* #rx"\\}" line)))
+        ; Check if this line contains a definition and we're at top level (brace-depth = 0)
+        (when (and (= brace-depth 0)  ; only at top level
+                   (not (string-prefix? trimmed "/"))  ; not a comment
                    (not (string-prefix? trimmed "\\")) ; not a command
                    (regexp-match #rx"^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$" trimmed))
           (define match (regexp-match #rx"^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$" trimmed))
           (when match
             (define name (cadr match))
-            (set! definitions (cons (list name line-num) definitions)))))
+            (set! definitions (cons (list name line-num) definitions))))
+        ; Update brace depth after processing the line
+        (set! brace-depth (+ brace-depth open-braces (- close-braces))))
       (reverse definitions))
 
     (define (extract-racket-definitions text)
