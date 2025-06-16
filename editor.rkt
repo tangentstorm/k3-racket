@@ -68,8 +68,8 @@
  (add-style "other" "Magenta")
  (add-style "Standard" "Black"))
 
-(define k3-text% ; enhanced editor
-  (class racket:text%
+(define k3-text% ; enhanced editor with line numbers
+  (class (text:line-numbers-mixin racket:text%)
     (super-new)
 
     (define/override (on-local-event e)
