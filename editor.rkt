@@ -187,10 +187,10 @@
                                                  (define line-num (cadr def))
                                                  ; Jump to the line in the editor
                                                  (define line-start (send editor paragraph-start-position (- line-num 1)))
-                                                 (define line-end (send editor paragraph-end-position (- line-num 1)))
-                                                 ; Set cursor position and select the line
-                                                 (send editor set-position line-start line-end)
-                                                 ; Scroll to put the line at the top of the visible area
+                                                 ; Move cursor to the beginning of the line
+                                                 (send editor set-position line-start)
+                                                 ; Force scroll to put the line at the top by scrolling to end first, then to target
+                                                 (send editor scroll-to-position (send editor last-position))
                                                  (send editor scroll-to-position line-start))))]))
       panel)
 
