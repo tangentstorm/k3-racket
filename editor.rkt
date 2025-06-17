@@ -78,6 +78,51 @@
  (add-style "other" "Magenta")
  (add-style "Standard" "Black"))
 
+; Create a special style for tab-snips with light blue background
+(define tab-style (send styles new-named-style "tab-style" Syntax))
+(let [(delta (new style-delta%))]
+  (send delta set-delta-background (find-color "Light Blue"))
+  (send tab-style set-delta delta))
+
+; Custom tab-snip class that draws with light blue background and fixed width
+(define custom-tab-snip%
+  (class tab-snip%
+    (super-new)
+
+    ; Override get-extent to make tab always 4 spaces wide
+    (define/override (get-extent dc x y w h descent space lspace rspace)
+      (define char-width 8) ; approximate character width for 12pt font
+      (define fixed-tab-width (* 4 char-width)) ; exactly 4 spaces
+      (when w (set-box! w fixed-tab-width))
+      (when h (set-box! h 16)) ; line height
+      (when descent (set-box! descent 0))
+      (when space (set-box! space 0))
+      (when lspace (set-box! lspace 0))
+      (when rspace (set-box! rspace 0)))
+
+    (define/override (draw dc x y left top right bottom dx dy draw-caret)
+      ; Draw light blue background for exactly 4 spaces
+      (define old-brush (send dc get-brush))
+      (define old-pen (send dc get-pen))
+      (define char-width 8)
+      (define fixed-tab-width (* 4 char-width)) ; exactly 4 spaces
+      (define line-height 16)
+
+      ; Fill with light blue background
+      (send dc set-brush (new brush% [color (find-color "Light Blue")]))
+      (send dc set-pen (new pen% [color (find-color "Light Blue")]))
+      (send dc draw-rectangle x y fixed-tab-width line-height)
+
+      ; Draw a lighter border (1 pixel)
+      (send dc set-brush (new brush% [color (find-color "Light Blue")] [style 'transparent]))
+      (send dc set-pen (new pen% [color (find-color "Light Cyan")] [width 1]))
+      (send dc draw-rectangle x y fixed-tab-width line-height)
+
+      (send dc set-brush old-brush)
+      (send dc set-pen old-pen)
+      ; Don't call super draw - we want our fixed-width behavior only
+      )))
+
 (define k3-text% ; enhanced editor with line numbers
   (class (text:line-numbers-mixin racket:text%)
     (super-new)
@@ -89,6 +134,10 @@
 
     (define/public (get-current-file-path)
       current-file-path)
+
+    ; Override to create custom tab-snips with light blue background
+    (define/override (on-new-tab-snip)
+      (new custom-tab-snip%))
 
     (define/public (save-current-file)
       (when current-file-path
