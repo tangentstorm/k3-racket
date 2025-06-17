@@ -10,6 +10,11 @@
         (vector-ref args 0)
         "example.k")))
 
+; Get the directory of the specified file for the file browser
+(define k-directory
+  (let ([file-path (path->complete-path k-path)])
+    (path->string (path-only file-path))))
+
 ; Shared function to load a file and reset scroll position
 (define (load-file-with-scroll-reset editor file-path)
   (send editor clear)
@@ -431,7 +436,7 @@
       (define main-container (new vertical-panel% [parent parent]))
 
       ; Create file browser first to get access to path panel creation
-      (set! file-browser (new file-browser% [root-path "."]))
+      (set! file-browser (new file-browser% [root-path k-directory]))
 
       ; Create path breadcrumb at the top
       (send file-browser create-path-panel main-container)
