@@ -82,6 +82,49 @@
   (class (text:line-numbers-mixin racket:text%)
     (super-new)
 
+    (define current-file-path #f)
+
+    (define/public (set-current-file-path! path)
+      (set! current-file-path path))
+
+    (define/public (get-current-file-path)
+      current-file-path)
+
+    (define/public (save-current-file)
+      (when current-file-path
+        (save-file-preserving-line-endings current-file-path)
+        (printf "Saved: ~a\n" current-file-path)))
+
+    (define (save-file-preserving-line-endings file-path)
+      ; Detect original line endings from the file
+      (define original-line-ending
+        (if (file-exists? file-path)
+            (let ([content (file->bytes file-path)])
+              (cond
+                [(regexp-match #rx#"\r\n" content) "\r\n"] ; Windows CRLF
+                [(regexp-match #rx#"\r" content) "\r"]     ; Classic Mac CR
+                [else "\n"]))                              ; Unix LF (default)
+            "\n")) ; Default to Unix if file doesn't exist
+
+      ; Get the current text content
+      (define text-content (send this get-text 0 'eof))
+
+      ; Convert line endings to match original format
+      (define converted-content
+        (cond
+          [(equal? original-line-ending "\r\n")
+           (regexp-replace* #rx"\r?\n" text-content "\r\n")]
+          [(equal? original-line-ending "\r")
+           (regexp-replace* #rx"\r?\n" text-content "\r")]
+          [else
+           (regexp-replace* #rx"\r\n?" text-content "\n")]))
+
+      ; Write the file with preserved line endings
+      (call-with-output-file file-path
+        (lambda (out)
+          (display converted-content out))
+        #:exists 'replace))
+
     (define/override (on-local-event e)
       (super on-local-event e)
       (define ex (send e get-x))
@@ -251,6 +294,8 @@
     (define (load-file-in-editor file-path)
       (when current-editor
         (load-file-with-scroll-reset current-editor (path->string file-path))
+        ; Set the current file path in the editor
+        (send current-editor set-current-file-path! (path->string file-path))
         ; Update definitions panel when file is loaded
         (when definitions-panel
           (send definitions-panel update-definitions (path->string file-path)))))
@@ -330,6 +375,9 @@
 
     (define/public (dependencies) '())
 
+    (define/public (get-editor)
+      txt)
+
     (define/public (create parent)
       (define main-container (new vertical-panel% [parent parent]))
 
@@ -387,12 +435,44 @@
 
 ; -- main program ------------------------------------------------
 
-(define win
-  (window
-   #:title k-path #:size '(1024 768)
-   (k3-view k-path) ))
+; Create the main frame with menu bar
+(define frame (new frame%
+                   [label k-path]
+                   [width 1024]
+                   [height 768]))
 
-;(define ast (read-k3 k-path (open-input-string (send txt get-text 0 'eof))))
+; Create menu bar
+(define menu-bar (new menu-bar% [parent frame]))
+(define file-menu (new menu% [label "File"] [parent menu-bar]))
+
+; Global reference to the editor (will be set when k3-view is created)
+(define main-editor #f)
+
+; Save menu item with Ctrl+S/Cmd+S hotkey
+(define save-item (new menu-item%
+                       [label "Save"]
+                       [parent file-menu]
+                       [shortcut #\s]
+                       [callback (lambda (item event)
+                                  (when main-editor
+                                    (send main-editor save-current-file)))]))
+
+; Create the main panel for the k3-view
+(define main-panel (new panel% [parent frame]))
+
+; Create k3-view instance
+(define k3-view-instance (k3-view k-path))
+
+; Create the view in the main panel
+(send k3-view-instance create main-panel)
+
+; Get reference to the editor from the k3-view and set it for the menu
+(set! main-editor (send k3-view-instance get-editor))
+
+; Set the initial file path in the editor
+(send main-editor set-current-file-path! k-path)
+
 (define ast (read-k3 k-path (open-input-file k-path)))
 
-(render win)
+; Show the frame
+(send frame show #t)
