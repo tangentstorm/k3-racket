@@ -2,6 +2,7 @@
 (require framework racket/gui/easy)
 (require k3/color k3)
 (require syntax/stx)
+(require racket/system)
 
 ; Read file path from command line arguments, default to "example.k"
 (define k-path
@@ -498,9 +499,211 @@
 ; Create menu bar
 (define menu-bar (new menu-bar% [parent frame]))
 (define file-menu (new menu% [label "File"] [parent menu-bar]))
+(define transfer-menu (new menu% [label "Transfer"] [parent menu-bar]))
 
 ; Global reference to the editor (will be set when k3-view is created)
 (define main-editor #f)
+
+; SCP Configuration storage and persistence
+(define scp-config (make-hash))
+(define config-file-path (build-path (find-system-path 'home-dir) ".kracket"))
+
+; Load configuration from file
+(define (load-scp-config)
+  (when (file-exists? config-file-path)
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (printf "Warning: Could not load config file: ~a\n" (exn-message e)))])
+      (define config-data (call-with-input-file config-file-path read))
+      (when (hash? config-data)
+        (hash-set! scp-config 'remote-host (hash-ref config-data 'remote-host ""))
+        (hash-set! scp-config 'remote-path (hash-ref config-data 'remote-path ""))
+        (hash-set! scp-config 'ssh-key-path (hash-ref config-data 'ssh-key-path ""))))))
+
+; Save configuration to file
+(define (save-scp-config)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (printf "Warning: Could not save config file: ~a\n" (exn-message e)))])
+    (call-with-output-file config-file-path
+      (lambda (out)
+        (write scp-config out))
+      #:exists 'replace)))
+
+; Initialize default values and load saved config
+(hash-set! scp-config 'remote-host "")
+(hash-set! scp-config 'remote-path "")
+(hash-set! scp-config 'ssh-key-path "")
+(load-scp-config)
+
+; Function to show SCP configuration dialog
+(define (show-scp-config-dialog)
+  (define config-dialog (new dialog%
+                             [label "SCP Transfer Configuration"]
+                             [width 400]
+                             [height 200]))
+
+  (define main-panel (new vertical-panel% [parent config-dialog]))
+
+  ; Remote host field
+  (define host-panel (new horizontal-panel% [parent main-panel] [stretchable-height #f]))
+  (new message% [parent host-panel] [label "Remote Host:"] [min-width 100])
+  (define host-field (new text-field%
+                          [parent host-panel]
+                          [label #f]
+                          [init-value (hash-ref scp-config 'remote-host "")]
+                          [min-width 250]))
+
+  ; Remote path field
+  (define path-panel (new horizontal-panel% [parent main-panel] [stretchable-height #f]))
+  (new message% [parent path-panel] [label "Remote Path:"] [min-width 100])
+  (define path-field (new text-field%
+                          [parent path-panel]
+                          [label #f]
+                          [init-value (hash-ref scp-config 'remote-path "")]
+                          [min-width 250]))
+
+  ; SSH key path field
+  (define key-panel (new horizontal-panel% [parent main-panel] [stretchable-height #f]))
+  (new message% [parent key-panel] [label "SSH Key Path:"] [min-width 100])
+  (define key-field (new text-field%
+                         [parent key-panel]
+                         [label #f]
+                         [init-value (hash-ref scp-config 'ssh-key-path "")]
+                         [min-width 250]))
+
+  ; Button panel
+  (define button-panel (new horizontal-panel% [parent main-panel] [stretchable-height #f]))
+  (new button% [parent button-panel] [label "OK"]
+       [callback (lambda (button event)
+                   (hash-set! scp-config 'remote-host (send host-field get-value))
+                   (hash-set! scp-config 'remote-path (send path-field get-value))
+                   (hash-set! scp-config 'ssh-key-path (send key-field get-value))
+                   (save-scp-config)
+                   (send config-dialog show #f))])
+  (new button% [parent button-panel] [label "Cancel"]
+       [callback (lambda (button event)
+                   (send config-dialog show #f))])
+
+  (send config-dialog show #t))
+
+; Function to transfer file via SCP
+(define (transfer-current-file-via-scp)
+  (when main-editor
+    (define current-file (send main-editor get-current-file-path))
+    (if current-file
+        (let ([remote-host (hash-ref scp-config 'remote-host "")]
+              [remote-path (hash-ref scp-config 'remote-path "")]
+              [ssh-key-path (hash-ref scp-config 'ssh-key-path "")])
+          (cond
+            [(string=? remote-host "")
+             (message-box "SCP Transfer" "Please configure remote host first." frame '(ok))]
+            [else
+             ; Save file before transfer
+             (send main-editor save-current-file)
+             ; Perform SCP transfer
+             (transfer-file-scp current-file remote-host remote-path ssh-key-path)]))
+        (message-box "SCP Transfer" "No file is currently open." frame '(ok)))))
+
+; Function to perform the actual SCP transfer
+(define (transfer-file-scp local-file remote-host remote-path ssh-key-path)
+  ; Construct SCP command
+  (define scp-args
+    (if (and ssh-key-path (not (string=? ssh-key-path "")))
+        (list "-i" ssh-key-path local-file
+              (string-append remote-host ":" remote-path))
+        (list local-file
+              (string-append remote-host ":" remote-path))))
+
+  ; Debug output
+  (printf "SCP Command: scp ~a\n" (string-join scp-args " "))
+  (printf "Local file: ~a\n" local-file)
+  (printf "Remote host: ~a\n" remote-host)
+  (printf "Remote path: ~a\n" remote-path)
+
+  ; Show initial status message
+  (printf "Starting transfer...\n")
+
+  ; Create a simple progress frame (non-modal)
+  (define progress-frame (new frame%
+                              [label "SCP Transfer"]
+                              [width 300]
+                              [height 100]))
+  (define progress-panel (new vertical-panel% [parent progress-frame]))
+  (define status-msg (new message%
+                          [parent progress-panel]
+                          [label "Transferring file..."]))
+  (define progress-gauge (new gauge%
+                              [parent progress-panel]
+                              [label #f]
+                              [range 100]))
+
+  ; Show progress frame
+  (send progress-frame show #t)
+
+  ; Execute SCP in a separate thread to avoid blocking GUI
+  (thread
+   (lambda ()
+     (with-handlers ([exn:fail? (lambda (e)
+                                  (printf "SCP Error: ~a\n" (exn-message e))
+                                  (queue-callback
+                                   (lambda ()
+                                     (send progress-frame show #f)
+                                     (message-box "SCP Transfer Error"
+                                                  (format "Transfer failed with error: ~a"
+                                                          (exn-message e))
+                                                  frame '(ok stop)))))])
+       ; Start progress animation
+       (define progress-thread
+         (thread
+          (lambda ()
+            (let loop ([progress 0])
+              (when (send progress-frame is-shown?)
+                (queue-callback
+                 (lambda ()
+                   (when (send progress-frame is-shown?)
+                     (send progress-gauge set-value (modulo progress 100)))))
+                (sleep 0.1)
+                (loop (+ progress 5)))))))
+
+       (printf "Executing SCP command...\n")
+       (define-values (process stdout stdin stderr)
+         (apply subprocess #f #f #f "/usr/bin/scp" scp-args))
+
+       (printf "Process started, waiting for completion...\n")
+
+       ; Read any error output
+       (define error-output (port->string stderr))
+       (define std-output (port->string stdout))
+
+       ; Wait for process to complete
+       (subprocess-wait process)
+       (define exit-code (subprocess-status process))
+
+       ; Stop progress animation
+       (kill-thread progress-thread)
+
+       ; Close ports
+       (close-output-port stdin)
+       (close-input-port stdout)
+       (close-input-port stderr)
+
+       ; Debug output
+       (printf "Exit code: ~a\n" exit-code)
+       (printf "Stdout: ~a\n" std-output)
+       (printf "Stderr: ~a\n" error-output)
+
+       ; Update UI on main thread
+       (queue-callback
+        (lambda ()
+          (send progress-frame show #f)
+          (if (= exit-code 0)
+              (message-box "SCP Transfer"
+                           (format "File successfully transferred to ~a"
+                                   (string-append remote-host ":" remote-path))
+                           frame '(ok))
+              (message-box "SCP Transfer Error"
+                           (format "Transfer failed with exit code: ~a\n\nError output:\n~a\n\nStandard output:\n~a"
+                                   exit-code error-output std-output)
+                           frame '(ok stop)))))))))
 
 ; Save menu item with Ctrl+S/Cmd+S hotkey
 (define save-item (new menu-item%
@@ -510,6 +713,21 @@
                        [callback (lambda (item event)
                                   (when main-editor
                                     (send main-editor save-current-file)))]))
+
+; SCP Configuration menu item
+(define scp-config-item (new menu-item%
+                             [label "Configure SCP..."]
+                             [parent transfer-menu]
+                             [callback (lambda (item event)
+                                         (show-scp-config-dialog))]))
+
+; Transfer current file menu item with Ctrl+T/Cmd+T hotcut
+(define transfer-item (new menu-item%
+                           [label "Transfer Current File"]
+                           [parent transfer-menu]
+                           [shortcut #\t]
+                           [callback (lambda (item event)
+                                       (transfer-current-file-via-scp))]))
 
 ; Create the main panel for the k3-view
 (define main-panel (new panel% [parent frame]))
