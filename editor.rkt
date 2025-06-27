@@ -4,12 +4,36 @@
 (require syntax/stx)
 (require racket/system)
 
-; Read file path from command line arguments, default to "example.k"
+; Last file configuration
+(define last-file-path (build-path (find-system-path 'home-dir) ".kracket-last-file"))
+
+; Function to save the last opened file
+(define (save-last-file file-path)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (printf "Warning: Could not save last file: ~a\n" (exn-message e)))])
+    (call-with-output-file last-file-path
+      (lambda (out)
+        (write file-path out))
+      #:exists 'replace)))
+
+; Function to load the last opened file
+(define (load-last-file)
+  (if (file-exists? last-file-path)
+      (with-handlers ([exn:fail? (lambda (e)
+                                   (printf "Warning: Could not load last file: ~a\n" (exn-message e))
+                                   "example.k")])
+        (define last-file (call-with-input-file last-file-path read))
+        (if (and (string? last-file) (file-exists? last-file))
+            last-file
+            "example.k"))
+      "example.k"))
+
+; Read file path from command line arguments, or use last file, default to "example.k"
 (define k-path
   (let ([args (current-command-line-arguments)])
     (if (> (vector-length args) 0)
         (vector-ref args 0)
-        "example.k")))
+        (load-last-file))))
 
 ; Get the directory of the specified file for the file browser
 (define k-directory
@@ -24,7 +48,9 @@
   (send editor set-position 0)
   (send editor scroll-to-position 0)
   ; Force horizontal scroll to leftmost position
-  (send editor move-position 'home #f 'simple))
+  (send editor move-position 'home #f 'simple)
+  ; Save this file as the last opened file
+  (save-last-file file-path))
 
 ; --  syntax tree support  ----------------------------------------
 
