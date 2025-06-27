@@ -227,7 +227,7 @@
     (define definitions-list #f)
     (define current-file-path #f)
     (define current-definitions '()) ; Store definitions with line numbers
-    (define sort-alphabetically? #f) ; Sort by name when true, by line number when false
+    (define sort-alphabetically? (hash-ref scp-config 'sort-definitions-alphabetically #f)) ; Sort by name when true, by line number when false
 
     (define/public (dependencies) '())
 
@@ -304,9 +304,11 @@
       (define sort-checkbox (new check-box%
                                  [parent header-panel]
                                  [label "az"]
-                                 [value #f]
+                                 [value sort-alphabetically?]
                                  [callback (lambda (cb event)
                                             (set! sort-alphabetically? (send cb get-value))
+                                            (hash-set! scp-config 'sort-definitions-alphabetically sort-alphabetically?)
+                                            (save-scp-config)
                                             (refresh-definitions))]))
 
       (set! definitions-list (new list-box%
@@ -453,11 +455,71 @@
     (define txt #f)
     (define file-browser #f)
     (define definitions-panel #f)
+    (define browser-panel #f)
+    (define defs-panel #f)
+    (define main-panel #f)
+
+    ; Panel visibility state - load from config
+    (define show-file-browser? (hash-ref scp-config 'show-file-browser #t))
+    (define show-definitions? (hash-ref scp-config 'show-definitions #t))
 
     (define/public (dependencies) '())
 
     (define/public (get-editor)
       txt)
+
+    ; Toggle file browser panel
+    (define/public (toggle-file-browser)
+      (set! show-file-browser? (not show-file-browser?))
+      (hash-set! scp-config 'show-file-browser show-file-browser?)
+      (save-scp-config)
+      (if show-file-browser?
+          (show-browser-panel)
+          (hide-browser-panel)))
+
+    ; Toggle definitions panel
+    (define/public (toggle-definitions)
+      (set! show-definitions? (not show-definitions?))
+      (hash-set! scp-config 'show-definitions show-definitions?)
+      (save-scp-config)
+      (if show-definitions?
+          (show-definitions-panel)
+          (hide-definitions-panel)))
+
+    ; Show browser panel
+    (define (show-browser-panel)
+      (when (and main-panel (not browser-panel))
+        (set! browser-panel (send file-browser create main-panel))
+        (send browser-panel min-width 150)
+        (send browser-panel stretchable-width #f)
+        ; Move browser panel to the beginning
+        (send main-panel change-children
+              (lambda (children)
+                (cons browser-panel (filter (lambda (c) (not (eq? c browser-panel))) children))))))
+
+    ; Hide browser panel
+    (define (hide-browser-panel)
+      (when browser-panel
+        (send main-panel delete-child browser-panel)
+        (set! browser-panel #f)))
+
+    ; Show definitions panel
+    (define (show-definitions-panel)
+      (when (and main-panel (not defs-panel))
+        (set! defs-panel (send definitions-panel create main-panel))
+        (send defs-panel min-width 200)
+        (send defs-panel stretchable-width #f)
+        ; Update definitions for current file
+        (when txt
+          (define current-file (send txt get-current-file-path))
+          (when current-file
+            (send definitions-panel update-definitions current-file)))))
+
+    ; Hide definitions panel
+    (define (hide-definitions-panel)
+      (when defs-panel
+        (send main-panel delete-child defs-panel)
+        (set! defs-panel #f)))
 
     (define/public (create parent)
       (define main-container (new vertical-panel% [parent parent]))
@@ -469,12 +531,7 @@
       (send file-browser create-path-panel main-container)
 
       ; Create horizontal panel for browser, editor, and definitions
-      (define main-panel (new horizontal-panel% [parent main-container]))
-
-      ; Create narrow file browser (left side)
-      (define browser-panel (send file-browser create main-panel))
-      (send browser-panel min-width 150)
-      (send browser-panel stretchable-width #f)
+      (set! main-panel (new horizontal-panel% [parent main-container]))
 
       ; Create editor (center) - takes remaining space
       (define ed (new editor-canvas% [parent main-panel]))
@@ -485,11 +542,25 @@
       ; Ensure editor starts at top-left position
       (send ed scroll-to 0 0 0 0 #t)
 
-      ; Create definitions panel (right side)
+      ; Create definitions panel instance
       (set! definitions-panel (new definitions-panel% [editor txt]))
-      (define defs-panel (send definitions-panel create main-panel))
-      (send defs-panel min-width 200)
-      (send defs-panel stretchable-width #f)
+
+      ; Create initial panels based on visibility state
+      (when show-file-browser?
+        (set! browser-panel (send file-browser create main-panel))
+        (send browser-panel min-width 150)
+        (send browser-panel stretchable-width #f))
+
+      (when show-definitions?
+        (set! defs-panel (send definitions-panel create main-panel))
+        (send defs-panel min-width 200)
+        (send defs-panel stretchable-width #f))
+
+      ; Ensure proper panel ordering - file browser on left, definitions on right
+      (when (and show-file-browser? show-definitions?)
+        (send main-panel change-children
+              (lambda (children)
+                (list browser-panel ed defs-panel))))
 
       ; Connect file browser to editor and definitions panel
       (send file-browser set-editor! txt)
@@ -503,7 +574,8 @@
       (load-file-with-scroll-reset txt k-path)
 
       ; Update definitions for initial file
-      (send definitions-panel update-definitions k-path))
+      (when show-definitions?
+        (send definitions-panel update-definitions k-path)))
 
     (define/public (update v what val)
       (void))
@@ -525,10 +597,13 @@
 ; Create menu bar
 (define menu-bar (new menu-bar% [parent frame]))
 (define file-menu (new menu% [label "File"] [parent menu-bar]))
+(define view-menu (new menu% [label "View"] [parent menu-bar]))
 (define transfer-menu (new menu% [label "Transfer"] [parent menu-bar]))
 
 ; Global reference to the editor (will be set when k3-view is created)
 (define main-editor #f)
+; Global reference to the k3-view instance for panel toggling
+(define main-k3-view #f)
 
 ; SCP Configuration storage and persistence
 (define scp-config (make-hash))
@@ -543,7 +618,10 @@
       (when (hash? config-data)
         (hash-set! scp-config 'remote-host (hash-ref config-data 'remote-host ""))
         (hash-set! scp-config 'remote-path (hash-ref config-data 'remote-path ""))
-        (hash-set! scp-config 'ssh-key-path (hash-ref config-data 'ssh-key-path ""))))))
+        (hash-set! scp-config 'ssh-key-path (hash-ref config-data 'ssh-key-path ""))
+        (hash-set! scp-config 'show-file-browser (hash-ref config-data 'show-file-browser #t))
+        (hash-set! scp-config 'show-definitions (hash-ref config-data 'show-definitions #t))
+        (hash-set! scp-config 'sort-definitions-alphabetically (hash-ref config-data 'sort-definitions-alphabetically #f))))))
 
 ; Save configuration to file
 (define (save-scp-config)
@@ -558,6 +636,9 @@
 (hash-set! scp-config 'remote-host "")
 (hash-set! scp-config 'remote-path "")
 (hash-set! scp-config 'ssh-key-path "")
+(hash-set! scp-config 'show-file-browser #t)
+(hash-set! scp-config 'show-definitions #t)
+(hash-set! scp-config 'sort-definitions-alphabetically #f)
 (load-scp-config)
 
 ; Function to show SCP configuration dialog
@@ -755,6 +836,23 @@
                            [callback (lambda (item event)
                                        (transfer-current-file-via-scp))]))
 
+; View menu items for toggling panels
+(define toggle-file-browser-item (new menu-item%
+                                      [label "Toggle File Browser"]
+                                      [parent view-menu]
+                                      [shortcut #\1]
+                                      [callback (lambda (item event)
+                                                 (when main-k3-view
+                                                   (send main-k3-view toggle-file-browser)))]))
+
+(define toggle-definitions-item (new menu-item%
+                                     [label "Toggle Definitions Panel"]
+                                     [parent view-menu]
+                                     [shortcut #\2]
+                                     [callback (lambda (item event)
+                                                (when main-k3-view
+                                                  (send main-k3-view toggle-definitions)))]))
+
 ; Create the main panel for the k3-view
 (define main-panel (new panel% [parent frame]))
 
@@ -766,6 +864,8 @@
 
 ; Get reference to the editor from the k3-view and set it for the menu
 (set! main-editor (send k3-view-instance get-editor))
+; Set global reference to k3-view instance for panel toggling
+(set! main-k3-view k3-view-instance)
 
 ; Set the initial file path in the editor
 (send main-editor set-current-file-path! k-path)
