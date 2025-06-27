@@ -4,54 +4,6 @@
 (require syntax/stx)
 (require racket/system)
 
-; Last file configuration
-(define last-file-path (build-path (find-system-path 'home-dir) ".kracket-last-file"))
-
-; Function to save the last opened file
-(define (save-last-file file-path)
-  (with-handlers ([exn:fail? (lambda (e)
-                               (printf "Warning: Could not save last file: ~a\n" (exn-message e)))])
-    (call-with-output-file last-file-path
-      (lambda (out)
-        (write file-path out))
-      #:exists 'replace)))
-
-; Function to load the last opened file
-(define (load-last-file)
-  (if (file-exists? last-file-path)
-      (with-handlers ([exn:fail? (lambda (e)
-                                   (printf "Warning: Could not load last file: ~a\n" (exn-message e))
-                                   "example.k")])
-        (define last-file (call-with-input-file last-file-path read))
-        (if (and (string? last-file) (file-exists? last-file))
-            last-file
-            "example.k"))
-      "example.k"))
-
-; Read file path from command line arguments, or use last file, default to "example.k"
-(define k-path
-  (let ([args (current-command-line-arguments)])
-    (if (> (vector-length args) 0)
-        (vector-ref args 0)
-        (load-last-file))))
-
-; Get the directory of the specified file for the file browser
-(define k-directory
-  (let ([file-path (path->complete-path k-path)])
-    (path->string (path-only file-path))))
-
-; Shared function to load a file and reset scroll position
-(define (load-file-with-scroll-reset editor file-path)
-  (send editor clear)
-  (send editor load-file file-path)
-  ; Reset scroll position to top-left after loading file
-  (send editor set-position 0)
-  (send editor scroll-to-position 0)
-  ; Force horizontal scroll to leftmost position
-  (send editor move-position 'home #f 'simple)
-  ; Save this file as the last opened file
-  (save-last-file file-path))
-
 ; --  syntax tree support  ----------------------------------------
 
 (define (pos-in-syntax? pos stx)
@@ -160,6 +112,7 @@
     (super-new)
 
     (define current-file-path #f)
+    (define modified? #f)
 
     (define/public (set-current-file-path! path)
       (set! current-file-path path))
@@ -167,13 +120,24 @@
     (define/public (get-current-file-path)
       current-file-path)
 
+    (define/public (is-file-modified?)
+      modified?)
+
+    (define/public (set-file-modified! mod?)
+      (set! modified? mod?))
+
     ; Override to create custom tab-snips with light blue background
     (define/override (on-new-tab-snip)
       (new custom-tab-snip%))
 
+    ; Method to mark as modified (called externally)
+    (define/public (mark-modified!)
+      (set! modified? #t))
+
     (define/public (save-current-file)
       (when current-file-path
         (save-file-preserving-line-endings current-file-path)
+        (set! modified? #f)
         (printf "Saved: ~a\n" current-file-path)))
 
     (define (save-file-preserving-line-endings file-path)
@@ -216,7 +180,253 @@
       (define snip (send this find-snip pos 'after))
       (when (eq? 'left-down (send e get-event-type))
         (printf "click @ pos:~a ch:~a snip:~a\n" pos ch snip)
-        (for [(node (find-token ast pos))] (displayln node))))))
+        (when (and ast (syntax? ast))
+          (for [(node (find-token ast pos))] (displayln node)))))))
+
+; Shared function to load a file and reset scroll position
+(define (load-file-with-scroll-reset editor file-path)
+  (send editor clear)
+  (send editor load-file file-path)
+  ; Reset scroll position to top-left after loading file
+  (send editor set-position 0)
+  (send editor scroll-to-position 0)
+  ; Force horizontal scroll to leftmost position
+  (send editor move-position 'home #f 'simple)
+  ; Mark as unmodified after loading
+  (send editor set-file-modified! #f))
+
+; Tab container class using vertical-panel% with custom tab bar
+(define tab-container%
+  (class vertical-panel%
+    (init-field [parent #f] [definitions-panel #f])
+    (super-new [parent parent])
+
+    (define tab-data '()) ; List of (hash 'file-path 'editor 'canvas 'title)
+    (define next-untitled-id 1)
+    (define tab-bar #f)
+    (define editor-panel #f)
+    (define active-tab-index 0)
+
+    (define/public (get-tab-count)
+      (length tab-data))
+
+    (define/public (get-active-tab-index)
+      active-tab-index)
+
+    (define/public (get-active-editor)
+      (define index (get-active-tab-index))
+      (if (and (>= index 0) (< index (length tab-data)))
+          (hash-ref (list-ref tab-data index) 'editor)
+          #f))
+
+    (define/public (get-active-file-path)
+      (define editor (get-active-editor))
+      (if editor
+          (send editor get-current-file-path)
+          #f))
+
+    (define/public (get-tab-file-paths)
+      (map (lambda (tab) (hash-ref tab 'file-path)) tab-data))
+
+    (define (on-tab-switch)
+      (define index (get-active-tab-index))
+      (when (and (>= index 0) (< index (length tab-data)))
+        (define tab (list-ref tab-data index))
+        (define editor (hash-ref tab 'editor))
+        (define file-path (hash-ref tab 'file-path))
+
+        ; Update global reference
+        (set! main-editor editor)
+
+        ; Update definitions panel
+        (when definitions-panel
+          (send definitions-panel set-active-tab-editor! editor file-path))
+
+        ; Save tab state
+        (save-tab-state)))
+
+    (define (create-tab-title file-path)
+      (cond
+        [file-path (path->string (file-name-from-path file-path))]
+        [else (format "Untitled-~a" next-untitled-id)]))
+
+    (define (update-tab-title index)
+      (when (and (>= index 0) (< index (length tab-data)))
+        (define tab (list-ref tab-data index))
+        (define editor (hash-ref tab 'editor))
+        (define base-title (hash-ref tab 'title))
+        (define modified? (send editor is-file-modified?))
+        (define display-title (if modified? (string-append base-title "*") base-title))
+
+        ; Update the tab label using set-item-label
+        (send this set-item-label index display-title)))
+
+    (define/public (add-tab file-path)
+      ; Check if file is already open
+      (define existing-index (find-tab-with-file file-path))
+      (cond
+        [existing-index (switch-to-tab existing-index)]
+        [else
+         ; Create new editor and canvas - initially hidden
+         (define canvas (new editor-canvas% [parent editor-panel]))
+         (define editor (new k3-text%))
+         (send canvas set-editor editor)
+         (send editor set-style-list styles)
+         (send canvas show #f) ; Hide initially
+
+         ; Load file if specified
+         (when file-path
+           (load-file-with-scroll-reset editor file-path)
+           (send editor set-current-file-path! file-path))
+
+         ; Create tab data
+         (define title (create-tab-title file-path))
+         (when (not file-path)
+           (set! next-untitled-id (+ next-untitled-id 1)))
+
+         (define tab-info (hash 'file-path file-path
+                                'editor editor
+                                'canvas canvas
+                                'title title))
+
+         ; Add to tab data
+         (set! tab-data (append tab-data (list tab-info)))
+
+         ; Create tab button
+         (create-tab-button (- (length tab-data) 1) title)
+
+         ; Set up syntax coloring
+         (define token-sym->style (lambda (sym) (symbol->string sym)))
+         (define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
+         (send editor start-colorer token-sym->style k3-color pairs)
+
+         ; Switch to new tab
+         (switch-to-tab (- (length tab-data) 1))
+
+         ; Save tab state
+         (save-tab-state)]))
+
+    (define (find-tab-with-file file-path)
+      (if file-path
+          (let loop ([tabs tab-data] [index 0])
+            (cond
+              [(null? tabs) #f]
+              [(equal? (hash-ref (car tabs) 'file-path) file-path) index]
+              [else (loop (cdr tabs) (+ index 1))]))
+          #f))
+
+    (define (find-tab-with-editor editor)
+      (let loop ([tabs tab-data] [index 0])
+        (cond
+          [(null? tabs) #f]
+          [(eq? (hash-ref (car tabs) 'editor) editor) index]
+          [else (loop (cdr tabs) (+ index 1))])))
+
+    (define/public (close-tab index)
+      (when (and (>= index 0) (< index (length tab-data)))
+        (define tab (list-ref tab-data index))
+        (define editor (hash-ref tab 'editor))
+
+        ; Check for unsaved changes
+        (if (send editor is-file-modified?)
+            (let ([result (message-box "Unsaved Changes"
+                                       (format "Save changes to ~a?"
+                                               (hash-ref tab 'title))
+                                       #f
+                                       '(yes-no-cancel))])
+              (case result
+                [(yes) (send editor save-current-file)
+                       (do-close-tab index)]
+                [(no) (do-close-tab index)]
+                [(cancel) (void)]))
+            (do-close-tab index))))
+
+    ; Initialize the tab container UI
+    (define/public (init-ui)
+      ; Create tab bar at the top
+      (set! tab-bar (new horizontal-panel% [parent this] [stretchable-height #f]))
+      ; Create editor panel that takes up remaining space
+      (set! editor-panel (new panel% [parent this])))
+
+    ; Create a tab button
+    (define (create-tab-button index title)
+      (new button%
+           [parent tab-bar]
+           [label title]
+           [callback (lambda (btn event)
+                      (switch-to-tab index))]))
+
+    ; Switch to a specific tab
+    (define (switch-to-tab index)
+      (when (and (>= index 0) (< index (length tab-data)))
+        ; Hide all canvases
+        (for ([tab tab-data])
+          (send (hash-ref tab 'canvas) show #f))
+
+        ; Show the selected canvas
+        (define selected-tab (list-ref tab-data index))
+        (send (hash-ref selected-tab 'canvas) show #t)
+
+        ; Update active index
+        (set! active-tab-index index)
+
+        ; Trigger tab switch callback
+        (on-tab-switch)))
+
+    (define (do-close-tab index)
+      ; Get the tab to remove before modifying the list
+      (define tab-to-remove (list-ref tab-data index))
+      (define canvas-to-remove (hash-ref tab-to-remove 'canvas))
+
+      ; Remove from tab data
+      (set! tab-data (append (take tab-data index)
+                             (drop tab-data (+ index 1))))
+
+      ; Remove the canvas
+      (send editor-panel delete-child canvas-to-remove)
+
+      ; Rebuild tab bar
+      (rebuild-tab-bar)
+
+      ; Adjust selection if necessary
+      (when (> (length tab-data) 0)
+        (define new-selection (min index (- (length tab-data) 1)))
+        (switch-to-tab new-selection))
+
+      ; Save tab state
+      (save-tab-state))
+
+    ; Rebuild the tab bar
+    (define (rebuild-tab-bar)
+      (send tab-bar change-children (lambda (children) '()))
+      (for ([tab tab-data] [index (in-naturals)])
+        (define title (hash-ref tab 'title))
+        (create-tab-button index title)))
+
+    (define/public (close-current-tab)
+      (define index (get-active-tab-index))
+      (when (>= index 0)
+        (close-tab index)))
+
+    (define/public (save-current-tab)
+      (define editor (get-active-editor))
+      (when editor
+        (send editor save-current-file)
+        (update-tab-title (get-active-tab-index))))
+
+    (define/public (restore-tabs file-paths active-index)
+      ; Clear existing tabs first
+      (set! tab-data '())
+
+      ; Add tabs for each file path
+      (for ([file-path file-paths])
+        (add-tab (if (string=? file-path "") #f file-path)))
+
+      ; Set active tab
+      (when (and (> (length tab-data) 0)
+                 (>= active-index 0)
+                 (< active-index (length tab-data)))
+        (switch-to-tab active-index)))))
 
 ; Definitions panel component
 (define definitions-panel%
@@ -233,6 +443,11 @@
 
     (define/public (set-editor! ed)
       (set! editor ed))
+
+    (define/public (set-active-tab-editor! ed file-path)
+      (set! editor ed)
+      (set! current-file-path file-path)
+      (refresh-definitions))
 
     (define (extract-k3-definitions text)
       (define lines (string-split text "\n"))
@@ -282,18 +497,17 @@
 
     (define/public (update-definitions file-path)
       (set! current-file-path file-path)
-      (when (and definitions-list (file-exists? file-path))
-        (define text (file->string file-path))
-        (define defs (if (string-suffix? file-path ".k")
+      (refresh-definitions))
+
+    (define/public (refresh-definitions)
+      (when (and definitions-list current-file-path (file-exists? current-file-path))
+        (define text (file->string current-file-path))
+        (define defs (if (string-suffix? current-file-path ".k")
                         (extract-k3-definitions text)
                         (extract-racket-definitions text)))
         (define sorted-defs (sort-definitions defs))
         (set! current-definitions sorted-defs)
         (send definitions-list set (map (lambda (def) (format "~a (line ~a)" (car def) (cadr def))) sorted-defs))))
-
-    (define/public (refresh-definitions)
-      (when current-file-path
-        (update-definitions current-file-path)))
 
     (define/public (create parent)
       (define panel (new vertical-panel% [parent parent] [min-width 200]))
@@ -339,19 +553,15 @@
     (init-field [root-path "."])
     (super-new)
 
-    (define current-editor #f)
     (define current-path (simplify-path (path->complete-path root-path)))
     (define file-list #f)
     (define path-panel #f)
-    (define definitions-panel #f)
+    (define tab-container #f)
 
     (define/public (dependencies) '())
 
-    (define/public (set-editor! editor)
-      (set! current-editor editor))
-
-    (define/public (set-definitions-panel! panel)
-      (set! definitions-panel panel))
+    (define/public (set-tab-container! container)
+      (set! tab-container container))
 
     (define (get-items path)
       (define items '())
@@ -374,14 +584,9 @@
       (set! items (append items (map path->string files)))
       items)
 
-    (define (load-file-in-editor file-path)
-      (when current-editor
-        (load-file-with-scroll-reset current-editor (path->string file-path))
-        ; Set the current file path in the editor
-        (send current-editor set-current-file-path! (path->string file-path))
-        ; Update definitions panel when file is loaded
-        (when definitions-panel
-          (send definitions-panel update-definitions (path->string file-path)))))
+    (define (load-file-in-tab file-path)
+      (when tab-container
+        (send tab-container add-tab (path->string file-path))))
 
     (define (navigate-to new-path)
       (set! current-path (simplify-path (path->complete-path new-path)))
@@ -433,9 +638,9 @@
                                              (define dir-name (substring item-name 1 (- (string-length item-name) 1)))
                                              (navigate-to (build-path current-path dir-name))]
                                             [else
-                                             ; File - load in editor
+                                             ; File - load in tab
                                              (define file-path (build-path current-path item-name))
-                                             (load-file-in-editor file-path)]))))]))
+                                             (load-file-in-tab file-path)]))))]))
       panel)
 
     (define/public (create-path-panel parent)
@@ -452,7 +657,7 @@
     (init-field path)
     (super-new)
 
-    (define txt #f)
+    (define tab-container #f)
     (define file-browser #f)
     (define definitions-panel #f)
     (define browser-panel #f)
@@ -465,8 +670,8 @@
 
     (define/public (dependencies) '())
 
-    (define/public (get-editor)
-      txt)
+    (define/public (get-tab-container)
+      tab-container)
 
     ; Toggle file browser panel
     (define/public (toggle-file-browser)
@@ -508,12 +713,7 @@
       (when (and main-panel (not defs-panel))
         (set! defs-panel (send definitions-panel create main-panel))
         (send defs-panel min-width 200)
-        (send defs-panel stretchable-width #f)
-        ; Update definitions for current file
-        (when txt
-          (define current-file (send txt get-current-file-path))
-          (when current-file
-            (send definitions-panel update-definitions current-file)))))
+        (send defs-panel stretchable-width #f)))
 
     ; Hide definitions panel
     (define (hide-definitions-panel)
@@ -533,17 +733,14 @@
       ; Create horizontal panel for browser, editor, and definitions
       (set! main-panel (new horizontal-panel% [parent main-container]))
 
-      ; Create editor (center) - takes remaining space
-      (define ed (new editor-canvas% [parent main-panel]))
-      (set! txt (new k3-text%))
-      (send ed set-editor txt)
-      (send txt set-style-list styles)
-
-      ; Ensure editor starts at top-left position
-      (send ed scroll-to 0 0 0 0 #t)
-
       ; Create definitions panel instance
-      (set! definitions-panel (new definitions-panel% [editor txt]))
+      (set! definitions-panel (new definitions-panel% [editor #f]))
+
+      ; Create tab container (center) - takes remaining space
+      (set! tab-container (new tab-container% [parent main-panel] [definitions-panel definitions-panel]))
+
+      ; Initialize the tab container UI
+      (send tab-container init-ui)
 
       ; Create initial panels based on visibility state
       (when show-file-browser?
@@ -560,22 +757,14 @@
       (when (and show-file-browser? show-definitions?)
         (send main-panel change-children
               (lambda (children)
-                (list browser-panel ed defs-panel))))
+                (list browser-panel tab-container defs-panel))))
 
-      ; Connect file browser to editor and definitions panel
-      (send file-browser set-editor! txt)
-      (send file-browser set-definitions-panel! definitions-panel)
+      ; Connect file browser to tab container
+      (send file-browser set-tab-container! tab-container)
 
-      (define (token-sym->style sym) (symbol->string sym))
-      (define pairs '((|(| |)|) (|[| |]|) (|{| |}|)))
-      (send txt start-colorer token-sym->style k3-color pairs)
-
-      ; Load initial file with proper scroll reset
-      (load-file-with-scroll-reset txt k-path)
-
-      ; Update definitions for initial file
-      (when show-definitions?
-        (send definitions-panel update-definitions k-path)))
+      ; Restore tabs from config or create initial tab
+      (define-values (saved-tabs saved-active-index) (load-tab-state))
+      (send tab-container restore-tabs saved-tabs saved-active-index))
 
     (define/public (update v what val)
       (void))
@@ -587,6 +776,18 @@
 
 
 ; -- main program ------------------------------------------------
+
+; Read file path from command line arguments, or use default "example.k"
+(define k-path
+  (let ([args (current-command-line-arguments)])
+    (if (> (vector-length args) 0)
+        (vector-ref args 0)
+        "example.k")))
+
+; Get the directory of the specified file for the file browser
+(define k-directory
+  (let ([file-path (path->complete-path k-path)])
+    (path->string (path-only file-path))))
 
 ; Create the main frame with menu bar
 (define frame (new frame%
@@ -604,6 +805,8 @@
 (define main-editor #f)
 ; Global reference to the k3-view instance for panel toggling
 (define main-k3-view #f)
+; Global reference to AST for syntax tree support
+(define ast #f)
 
 ; SCP Configuration storage and persistence
 (define scp-config (make-hash))
@@ -621,7 +824,9 @@
         (hash-set! scp-config 'ssh-key-path (hash-ref config-data 'ssh-key-path ""))
         (hash-set! scp-config 'show-file-browser (hash-ref config-data 'show-file-browser #t))
         (hash-set! scp-config 'show-definitions (hash-ref config-data 'show-definitions #t))
-        (hash-set! scp-config 'sort-definitions-alphabetically (hash-ref config-data 'sort-definitions-alphabetically #f))))))
+        (hash-set! scp-config 'sort-definitions-alphabetically (hash-ref config-data 'sort-definitions-alphabetically #f))
+        (hash-set! scp-config 'open-tabs (hash-ref config-data 'open-tabs (list k-path)))
+        (hash-set! scp-config 'active-tab-index (hash-ref config-data 'active-tab-index 0))))))
 
 ; Save configuration to file
 (define (save-scp-config)
@@ -632,6 +837,26 @@
         (write scp-config out))
       #:exists 'replace)))
 
+; Tab state management functions
+(define (save-tab-state)
+  (when main-k3-view
+    (define tab-container (send main-k3-view get-tab-container))
+    (when tab-container
+      (define file-paths (send tab-container get-tab-file-paths))
+      (define active-index (send tab-container get-active-tab-index))
+      ; Convert #f file paths to empty strings for serialization
+      (define serializable-paths (map (lambda (path) (if path path "")) file-paths))
+      (hash-set! scp-config 'open-tabs serializable-paths)
+      (hash-set! scp-config 'active-tab-index active-index)
+      (save-scp-config))))
+
+(define (load-tab-state)
+  (define saved-tabs (hash-ref scp-config 'open-tabs (list k-path)))
+  (define saved-active-index (hash-ref scp-config 'active-tab-index 0))
+  ; Ensure we have at least one tab
+  (define final-tabs (if (null? saved-tabs) (list k-path) saved-tabs))
+  (values final-tabs saved-active-index))
+
 ; Initialize default values and load saved config
 (hash-set! scp-config 'remote-host "")
 (hash-set! scp-config 'remote-path "")
@@ -639,6 +864,8 @@
 (hash-set! scp-config 'show-file-browser #t)
 (hash-set! scp-config 'show-definitions #t)
 (hash-set! scp-config 'sort-definitions-alphabetically #f)
+(hash-set! scp-config 'open-tabs (list k-path))
+(hash-set! scp-config 'active-tab-index 0)
 (load-scp-config)
 
 ; Function to show SCP configuration dialog
@@ -818,8 +1045,32 @@
                        [parent file-menu]
                        [shortcut #\s]
                        [callback (lambda (item event)
-                                  (when main-editor
-                                    (send main-editor save-current-file)))]))
+                                  (when main-k3-view
+                                    (define tab-container (send main-k3-view get-tab-container))
+                                    (when tab-container
+                                      (send tab-container save-current-tab))))]))
+
+; New tab menu item with Ctrl+T/Cmd+T hotkey
+(define new-tab-item (new menu-item%
+                          [label "New Tab"]
+                          [parent file-menu]
+                          [shortcut #\t]
+                          [callback (lambda (item event)
+                                     (when main-k3-view
+                                       (define tab-container (send main-k3-view get-tab-container))
+                                       (when tab-container
+                                         (send tab-container add-tab #f))))]))
+
+; Close tab menu item with Ctrl+W/Cmd+W hotkey
+(define close-tab-item (new menu-item%
+                            [label "Close Tab"]
+                            [parent file-menu]
+                            [shortcut #\w]
+                            [callback (lambda (item event)
+                                       (when main-k3-view
+                                         (define tab-container (send main-k3-view get-tab-container))
+                                         (when tab-container
+                                           (send tab-container close-current-tab))))]))
 
 ; SCP Configuration menu item
 (define scp-config-item (new menu-item%
@@ -828,11 +1079,11 @@
                              [callback (lambda (item event)
                                          (show-scp-config-dialog))]))
 
-; Transfer current file menu item with Ctrl+T/Cmd+T hotcut
+; Transfer current file menu item with Ctrl+Shift+T hotkey
 (define transfer-item (new menu-item%
                            [label "Transfer Current File"]
                            [parent transfer-menu]
-                           [shortcut #\t]
+                           [shortcut #\T]
                            [callback (lambda (item event)
                                        (transfer-current-file-via-scp))]))
 
@@ -862,15 +1113,18 @@
 ; Create the view in the main panel
 (send k3-view-instance create main-panel)
 
-; Get reference to the editor from the k3-view and set it for the menu
-(set! main-editor (send k3-view-instance get-editor))
-; Set global reference to k3-view instance for panel toggling
+; Set global references
 (set! main-k3-view k3-view-instance)
+(define tab-container (send k3-view-instance get-tab-container))
+(set! main-editor (send tab-container get-active-editor))
 
-; Set the initial file path in the editor
-(send main-editor set-current-file-path! k-path)
-
-(define ast (read-k3 k-path (open-input-file k-path)))
+; Try to read AST for syntax tree support
+(with-handlers ([exn:fail? (lambda (e)
+                             (printf "Warning: Could not read AST: ~a\n" (exn-message e))
+                             (set! ast #f))])
+  (define current-file (send tab-container get-active-file-path))
+  (when (and current-file (file-exists? current-file))
+    (set! ast (read-k3 current-file (open-input-file current-file)))))
 
 ; Show the frame
 (send frame show #t)
