@@ -107,6 +107,32 @@
       ; Don't call super draw - we want our fixed-width behavior only
       )))
 
+; Custom tab button class with visual state indication
+(define custom-tab-button%
+  (class button%
+    (init-field [is-active #f] [base-title ""])
+    (super-new)
+
+    (define active-state is-active)
+    (define title base-title)
+
+    (define/public (set-active-state! active?)
+      (set! active-state active?)
+      ; Update the button label to show active state
+      (define display-label
+        (if active?
+            (string-append "● " title)  ; Active tab with bullet
+            (string-append "○ " title))) ; Inactive tab with hollow bullet
+      (send this set-label display-label))
+
+    (define/public (set-base-title! new-title)
+      (set! title new-title)
+      ; Refresh the display
+      (set-active-state! active-state))
+
+    (define/public (get-active-state)
+      active-state)))
+
 (define k3-text% ; enhanced editor with line numbers
   (class (text:line-numbers-mixin racket:text%)
     (super-new)
@@ -204,7 +230,7 @@
     (init-field [parent #f] [definitions-panel #f])
     (super-new [parent parent])
 
-    (define tab-data '()) ; List of (hash 'file-path 'editor 'canvas 'title)
+    (define tab-data '()) ; List of (hash 'file-path 'editor 'canvas 'title 'button)
     (define next-untitled-id 1)
     (define tab-bar #f)
     (define editor-panel #f)
@@ -287,16 +313,17 @@
          (when (not file-path)
            (set! next-untitled-id (+ next-untitled-id 1)))
 
-         (define tab-info (hash 'file-path file-path
-                                'editor editor
-                                'canvas canvas
-                                'title title))
+         ; Create tab button first with correct index
+         (define button (create-tab-button (length tab-data) title))
+
+         (define tab-info (make-hash (list (cons 'file-path file-path)
+                                          (cons 'editor editor)
+                                          (cons 'canvas canvas)
+                                          (cons 'title title)
+                                          (cons 'button button))))
 
          ; Add to tab data
          (set! tab-data (append tab-data (list tab-info)))
-
-         ; Create tab button
-         (create-tab-button (- (length tab-data) 1) title)
 
          ; Set up syntax coloring
          (define token-sym->style (lambda (sym) (symbol->string sym)))
@@ -353,11 +380,25 @@
 
     ; Create a tab button
     (define (create-tab-button index title)
-      (new button%
-           [parent tab-bar]
-           [label title]
-           [callback (lambda (btn event)
-                      (switch-to-tab index))]))
+      (define is-active? (= index active-tab-index))
+      (define button (new custom-tab-button%
+                          [parent tab-bar]
+                          [label title]
+                          [is-active is-active?]
+                          [base-title title]
+                          [callback (lambda (btn event)
+                                     (switch-to-tab index))]))
+      ; Set the initial active state to show proper styling
+      (send button set-active-state! is-active?)
+      button)
+
+    ; Update styling for all tab buttons
+    (define (update-all-tab-styling)
+      (for ([tab tab-data] [index (in-naturals)])
+        (define button (hash-ref tab 'button #f))
+        (when button
+          (define is-active? (= index active-tab-index))
+          (send button set-active-state! is-active?))))
 
     ; Switch to a specific tab
     (define (switch-to-tab index)
@@ -372,6 +413,9 @@
 
         ; Update active index
         (set! active-tab-index index)
+
+        ; Update tab button styling
+        (update-all-tab-styling)
 
         ; Trigger tab switch callback
         (on-tab-switch)))
@@ -404,7 +448,11 @@
       (send tab-bar change-children (lambda (children) '()))
       (for ([tab tab-data] [index (in-naturals)])
         (define title (hash-ref tab 'title))
-        (create-tab-button index title)))
+        (define button (create-tab-button index title))
+        ; Update the tab data with the new button reference
+        (hash-set! tab 'button button))
+      ; Update styling after rebuilding
+      (update-all-tab-styling))
 
     (define/public (close-current-tab)
       (define index (get-active-tab-index))
