@@ -111,6 +111,9 @@
   (class (text:line-numbers-mixin racket:text%)
     (super-new)
 
+    ; Enable undo functionality with a reasonable history limit
+    (send this set-max-undo-history 100)
+
     (define current-file-path #f)
     (define modified? #f)
 
@@ -798,6 +801,7 @@
 ; Create menu bar
 (define menu-bar (new menu-bar% [parent frame]))
 (define file-menu (new menu% [label "File"] [parent menu-bar]))
+(define edit-menu (new menu% [label "Edit"] [parent menu-bar]))
 (define view-menu (new menu% [label "View"] [parent menu-bar]))
 (define transfer-menu (new menu% [label "Transfer"] [parent menu-bar]))
 
@@ -1038,6 +1042,32 @@
                            (format "Transfer failed with exit code: ~a\n\nError output:\n~a\n\nStandard output:\n~a"
                                    exit-code error-output std-output)
                            frame '(ok stop)))))))))
+
+; Undo menu item with Ctrl+Z/Cmd+Z hotkey
+(define undo-item (new menu-item%
+                       [label "Undo"]
+                       [parent edit-menu]
+                       [shortcut #\z]
+                       [callback (lambda (item event)
+                                  (when main-k3-view
+                                    (define tab-container (send main-k3-view get-tab-container))
+                                    (when tab-container
+                                      (define active-editor (send tab-container get-active-editor))
+                                      (when active-editor
+                                        (send active-editor undo)))))]))
+
+; Redo menu item with Ctrl+Y/Cmd+Y hotkey
+(define redo-item (new menu-item%
+                       [label "Redo"]
+                       [parent edit-menu]
+                       [shortcut #\y]
+                       [callback (lambda (item event)
+                                  (when main-k3-view
+                                    (define tab-container (send main-k3-view get-tab-container))
+                                    (when tab-container
+                                      (define active-editor (send tab-container get-active-editor))
+                                      (when active-editor
+                                        (send active-editor redo)))))]))
 
 ; Save menu item with Ctrl+S/Cmd+S hotkey
 (define save-item (new menu-item%
