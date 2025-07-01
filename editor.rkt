@@ -486,7 +486,79 @@
         (switch-to-tab active-index)))
 
     (define/public (set-file-browser! browser)
-      (set! file-browser browser))))
+      (set! file-browser browser))
+
+    (define/public (create-new-file-tab)
+      ; Determine the current directory - either from active tab or working directory
+      (define current-dir
+        (let ([active-file (get-active-file-path)])
+          (if active-file
+              (path->string (path-only (path->complete-path active-file)))
+              (current-directory))))
+
+      ; Show dialog to get filename
+      (define new-file-dialog (new dialog%
+                                   [label "Create New File"]
+                                   [width 500]
+                                   [height 150]))
+
+      (define dialog-panel (new vertical-panel% [parent new-file-dialog]))
+
+      ; Directory display
+      (define dir-panel (new horizontal-panel% [parent dialog-panel] [stretchable-height #f]))
+      (new message% [parent dir-panel] [label "Directory:"] [min-width 80])
+      (new message% [parent dir-panel] [label current-dir])
+
+      ; Filename input
+      (define filename-panel (new horizontal-panel% [parent dialog-panel] [stretchable-height #f]))
+      (new message% [parent filename-panel] [label "Filename:"] [min-width 80])
+      (define filename-field (new text-field%
+                                  [parent filename-panel]
+                                  [label #f]
+                                  [init-value ""]
+                                  [min-width 350]))
+
+      ; Button panel
+      (define button-panel (new horizontal-panel% [parent dialog-panel] [stretchable-height #f]))
+      (define result-box (box #f))
+      (new button% [parent button-panel] [label "Create"]
+           [callback (lambda (button event)
+                       (define filename (string-trim (send filename-field get-value)))
+                       (cond
+                         [(string=? filename "")
+                          (message-box "Error" "Please enter a filename." new-file-dialog '(ok))]
+                         [else
+                          (set-box! result-box filename)
+                          (send new-file-dialog show #f)]))])
+      (new button% [parent button-panel] [label "Cancel"]
+           [callback (lambda (button event)
+                       (send new-file-dialog show #f))])
+
+      ; Show dialog and get result
+      (send new-file-dialog show #t)
+      (define filename (unbox result-box))
+
+      ; Create the file if user didn't cancel
+      (when filename
+        (define full-path (build-path current-dir filename))
+        (define full-path-str (path->string full-path))
+
+        ; Check if file already exists
+        (if (file-exists? full-path)
+            (let ([choice (message-box "File Exists"
+                                       (format "File '~a' already exists. Open it instead?" filename)
+                                       frame
+                                       '(yes-no))])
+              (when (eq? choice 'yes)
+                (add-tab full-path-str)))
+            ; Create new empty file and open it
+            (begin
+              ; Create the file
+              (call-with-output-file full-path
+                (lambda (out) (display "" out))
+                #:exists 'error)
+              ; Open it in a new tab
+              (add-tab full-path-str)))))))
 
 ; Definitions panel component
 (define definitions-panel%
@@ -1161,16 +1233,16 @@
                                     (when tab-container
                                       (send tab-container save-current-tab))))]))
 
-; New tab menu item with Ctrl+T/Cmd+T hotkey
+; New tab menu item with Ctrl+N/Cmd+N hotkey
 (define new-tab-item (new menu-item%
                           [label "New Tab"]
                           [parent file-menu]
-                          [shortcut #\t]
+                          [shortcut #\n]
                           [callback (lambda (item event)
                                      (when main-k3-view
                                        (define tab-container (send main-k3-view get-tab-container))
                                        (when tab-container
-                                         (send tab-container add-tab #f))))]))
+                                         (send tab-container create-new-file-tab))))]))
 
 ; Close tab menu item with Ctrl+W/Cmd+W hotkey
 (define close-tab-item (new menu-item%
