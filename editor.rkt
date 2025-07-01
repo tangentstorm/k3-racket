@@ -235,6 +235,7 @@
     (define tab-bar #f)
     (define editor-panel #f)
     (define active-tab-index 0)
+    (define file-browser #f)
 
     (define/public (get-tab-count)
       (length tab-data))
@@ -270,6 +271,11 @@
         ; Update definitions panel
         (when definitions-panel
           (send definitions-panel set-active-tab-editor! editor file-path))
+
+        ; Update breadcrumbs to show the directory of the active tab
+        (when (and file-browser file-path)
+          (define file-dir (path->string (path-only (path->complete-path file-path))))
+          (send file-browser update-breadcrumbs-only file-dir))
 
         ; Save tab state
         (save-tab-state)))
@@ -477,7 +483,10 @@
       (when (and (> (length tab-data) 0)
                  (>= active-index 0)
                  (< active-index (length tab-data)))
-        (switch-to-tab active-index)))))
+        (switch-to-tab active-index)))
+
+    (define/public (set-file-browser! browser)
+      (set! file-browser browser))))
 
 ; Definitions panel component
 (define definitions-panel%
@@ -700,6 +709,28 @@
       (update-path-display)
       path-panel)
 
+    (define/public (update-breadcrumbs-only new-path-str)
+      ; Update breadcrumbs without changing the file list or current browsing path
+      (define new-path (simplify-path (path->complete-path new-path-str)))
+      (when path-panel
+        (send path-panel change-children (lambda (children) '()))
+        (define path-parts (explode-path new-path))
+        (define (create-path-button part accumulated-path)
+          (new button%
+               [parent path-panel]
+               [label (if (path? part) (path->string part) (format "~a" part))]
+               [callback (lambda (button event)
+                          (navigate-to accumulated-path))]))
+
+        (let loop ([parts path-parts] [acc-path #f])
+          (unless (null? parts)
+            (define part (car parts))
+            (define new-acc (if acc-path (build-path acc-path part) part))
+            (create-path-button part new-acc)
+            (unless (null? (cdr parts))
+              (new message% [parent path-panel] [label "/"]))
+            (loop (cdr parts) new-acc)))))
+
     (define/public (update v what val) (void))
     (define/public (destroy v) (void))))
 
@@ -812,6 +843,8 @@
 
       ; Connect file browser to tab container
       (send file-browser set-tab-container! tab-container)
+      ; Connect tab container to file browser
+      (send tab-container set-file-browser! file-browser)
 
       ; Restore tabs from config or create initial tab
       (define-values (saved-tabs saved-active-index) (load-tab-state))
