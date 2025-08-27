@@ -73,10 +73,11 @@
   (class tab-snip%
     (super-new)
 
-    ; Override get-extent to make tab always 4 spaces wide
+    ; Override get-extent to make tab always N spaces wide
     (define/override (get-extent dc x y w h descent space lspace rspace)
       (define char-width 8) ; approximate character width for 12pt font
-      (define fixed-tab-width (* 4 char-width)) ; exactly 4 spaces
+      (define tab-spaces 2) ; Change this to desired number of spaces (2, 4, 8, etc.)
+      (define fixed-tab-width (* tab-spaces char-width))
       (when w (set-box! w fixed-tab-width))
       (when h (set-box! h 16)) ; line height
       (when descent (set-box! descent 0))
@@ -89,7 +90,8 @@
       (define old-brush (send dc get-brush))
       (define old-pen (send dc get-pen))
       (define char-width 8)
-      (define fixed-tab-width (* 4 char-width)) ; exactly 4 spaces
+      (define tab-spaces 2) ; Should match the value above
+      (define fixed-tab-width (* tab-spaces char-width))
       (define line-height 16)
 
       ; Fill with light blue background
@@ -198,6 +200,57 @@
         (lambda (out)
           (display converted-content out))
         #:exists 'replace))
+
+    ; Override indentation behavior
+    (define/override (get-tab-size)
+      ; Change this to modify tab size (default is usually 8)
+      4)
+
+    (define/override (tabify-on-return?)
+      ; Return #t to auto-indent on Enter, #f to disable
+      #t)
+
+    ; Custom indentation logic
+    (define/override (tabify [pos #f])
+      ; If no position specified, use current position
+      (define target-pos (or pos (send this get-start-position)))
+
+      ; Get the current line
+      (define line-start (send this paragraph-start-position target-pos))
+      (define line-end (send this paragraph-end-position target-pos))
+      (define line-text (send this get-text line-start line-end))
+
+      ; Simple indentation strategy - you can customize this
+      (define indent-level (calculate-indent-level line-text target-pos))
+
+      ; Remove existing indentation
+      (define first-non-space (or (regexp-match-positions #rx"[^ \t]" line-text) '((0 . 0))))
+      (define indent-end (+ line-start (caar first-non-space)))
+      (send this delete line-start indent-end)
+
+      ; Insert new indentation
+      (send this insert (make-string (* indent-level (send this get-tab-size)) #\space) line-start))
+
+    ; Helper method to calculate indentation level
+    (define (calculate-indent-level line-text pos)
+      ; Simple strategy: count opening brackets/braces/parens
+      ; You can customize this for your K3 language syntax
+      (define prev-line-start (send this paragraph-start-position (max 0 (- pos 1))))
+      (define prev-line-end (send this paragraph-end-position prev-line-start))
+      (define prev-line (if (> prev-line-start 0)
+                           (send this get-text prev-line-start prev-line-end)
+                           ""))
+
+      ; Count nesting level based on brackets
+      (define open-count (+ (length (regexp-match* #rx"\\(" prev-line))
+                           (length (regexp-match* #rx"\\[" prev-line))
+                           (length (regexp-match* #rx"\\{" prev-line))))
+      (define close-count (+ (length (regexp-match* #rx"\\)" prev-line))
+                            (length (regexp-match* #rx"\\]" prev-line))
+                            (length (regexp-match* #rx"\\}" prev-line))))
+
+      ; Basic indentation: increase by 1 for each unmatched opening bracket
+      (max 0 (- open-count close-count)))
 
     (define/override (on-local-event e)
       (super on-local-event e)
